@@ -41,6 +41,19 @@ TARGET_CRS = "EPSG:31287"
 
 @contextmanager
 def timed(label: str):
+    """Context manager that prints start, end and duration of a step.
+
+    Parameters
+    ----------
+    label : str
+        Name of the step in the ``[start]``/``[done]`` lines.
+
+    Yields
+    ------
+    None
+        Control returns to the ``with`` block; the ``[done]`` line is printed
+        even if the block raises.
+    """
     t0 = time.perf_counter()
     print(f"[start] {label}", flush=True)
     try:
@@ -312,12 +325,43 @@ WATER_MIN_AREA_HA = 1.0
 # ---------------------------------------------------------------------------
 
 def expand_bounds(bounds, distance_m: float):
+    """Grow a bounding box by a distance on all four sides.
+
+    Parameters
+    ----------
+    bounds : tuple of float
+        ``(minx, miny, maxx, maxy)``.
+    distance_m : float
+        Distance in metres.
+
+    Returns
+    -------
+    tuple of float
+        The expanded ``(minx, miny, maxx, maxy)``.
+    """
     minx, miny, maxx, maxy = bounds
     d = float(distance_m)
     return (minx - d, miny - d, maxx + d, maxy + d)
 
 
 def parse_bbox(text: str | None):
+    """Parse a ``--bbox`` argument.
+
+    Parameters
+    ----------
+    text : str or None
+        ``"minx,miny,maxx,maxy"``.
+
+    Returns
+    -------
+    tuple of float or None
+        The four values, or ``None`` if ``text`` is empty.
+
+    Raises
+    ------
+    ValueError
+        If ``text`` does not contain exactly four values.
+    """
     if not text:
         return None
     vals = [float(x.strip()) for x in text.split(",")]
@@ -327,6 +371,22 @@ def parse_bbox(text: str | None):
 
 
 def load_grid(cfg: dict, bbox_text: str | None) -> dict:
+    """Derive the target grid from the DGM (fallback: the wind raster).
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config; reads ``cfg["paths"]["dgm"]`` or
+        ``cfg["paths"]["wind_pd_150"]``.
+    bbox_text : str or None
+        Optional ``--bbox``; restricts the grid to the matching window of the
+        template raster.
+
+    Returns
+    -------
+    dict
+        ``shape``, ``transform``, ``crs`` and ``bounds`` of the grid.
+    """
     template = Path(cfg["paths"].get("dgm") or cfg["paths"].get("wind_pd_150"))
     bbox = parse_bbox(bbox_text)
     with rasterio.open(template) as src:
@@ -434,6 +494,18 @@ PBF_CLIP_MARGIN_M = 13000.0
 
 
 def _run_osmium(cmd: list[str]) -> None:
+    """Run an osmium command.
+
+    Parameters
+    ----------
+    cmd : list of str
+        Command and arguments.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If the command exits with a non-zero status.
+    """
     subprocess.run(cmd, check=True)
 
 
@@ -538,6 +610,29 @@ def osm_layer_path(cfg: dict, osm_pbf: str, osm_pbf_cache_dir: str, layer: str, 
 
 
 def read_layer(path: Path, bounds=None, where: str | None = None, columns: list[str] | None = None) -> gpd.GeoDataFrame:
+    """Read a vector layer, normalise a few OSM columns and reproject it.
+
+    Parameters
+    ----------
+    path : Path
+        Vector file.
+    bounds : tuple of float, optional
+        If given, only features intersecting this box are kept.
+    where : str, optional
+        Attribute filter passed to ``geopandas.read_file``.
+    columns : list of str, optional
+        Columns to read; only applied to GeoJSON(Seq), FlatGeobuf and
+        GeoPackage files.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Features in ``TARGET_CRS``. Empty if the file is missing, is a GeoJSON
+        file smaller than 10 bytes, or has no features. Without an ``fclass``
+        column it is filled from the first of ``landuse``, ``highway``,
+        ``railway``, ``aeroway``, ``aerialway``; without ``type`` it is filled
+        from ``building``.
+    """
     if not path.exists():
         return gpd.GeoDataFrame(geometry=[], crs=TARGET_CRS)
     # Empty osmium GeoJSONSeq exports (no features in the bbox) are 0-1 bytes and
@@ -615,6 +710,28 @@ def drop_wind_power_buildings(buildings: gpd.GeoDataFrame, wind_power: gpd.GeoDa
 # ---------------------------------------------------------------------------
 
 def raster_mask(gdf: gpd.GeoDataFrame, buffer_m: float, grid: dict, label: str = "buffer") -> np.ndarray:
+    """Rasterise geometries and dilate them by a circular buffer.
+
+    Rasterises with ``all_touched=True`` on a padded grid, dilates with
+    ``fft_circle_dilation()`` (tile size 2048) and crops back to the grid.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Geometries to rasterise.
+    buffer_m : float
+        Buffer radius in metres; ``0`` rasterises without buffer.
+    grid : dict
+        Target grid.
+    label : str, optional
+        Label for progress messages, default ``"buffer"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask of the grid's shape; all ``False`` if nothing is
+        rasterised.
+    """
     shape = grid["shape"]
     if gdf.empty:
         return np.zeros(shape, dtype=bool)
@@ -644,6 +761,21 @@ def raster_mask(gdf: gpd.GeoDataFrame, buffer_m: float, grid: dict, label: str =
 
 
 def admin_boundaries(cfg: dict, bounds) -> gpd.GeoDataFrame:
+    """Read the administrative boundaries (VGD) for a bounding box.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config; reads ``cfg["paths"]["vgd"]``.
+    bounds : tuple of float or None
+        Bounding box passed to ``read_layer()``.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        The boundaries; the first of ``BL_NAME``, ``NAME``, ``NAME_1``,
+        ``bundesland`` is renamed to ``BL`` if no ``BL`` column exists.
+    """
     vgd = Path(cfg["paths"]["vgd"])
     gdf = read_layer(vgd, bounds=bounds)
     if gdf.empty:
@@ -657,6 +789,21 @@ def admin_boundaries(cfg: dict, bounds) -> gpd.GeoDataFrame:
 
 
 def add_bl_by_centroid(gdf: gpd.GeoDataFrame, bl: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Assign each feature the Bundesland that contains its centroid.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Features to tag.
+    bl : geopandas.GeoDataFrame
+        Bundesland polygons with a ``BL`` column.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Copy of ``gdf`` with a ``BL`` column; ``None`` throughout if ``gdf`` or
+        ``bl`` is empty or ``bl`` has no ``BL`` column.
+    """
     if gdf.empty or bl.empty or "BL" not in bl.columns:
         return gdf.assign(BL=None)
     pts = gpd.GeoDataFrame(gdf.drop(columns="geometry"), geometry=gdf.geometry.centroid, crs=gdf.crs)
@@ -667,6 +814,24 @@ def add_bl_by_centroid(gdf: gpd.GeoDataFrame, bl: gpd.GeoDataFrame) -> gpd.GeoDa
 
 
 def province_buffer_mask(gdf: gpd.GeoDataFrame, bl: gpd.GeoDataFrame, distances: dict[str, float], grid: dict) -> np.ndarray:
+    """Buffer features with a per-Bundesland distance.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Features to buffer.
+    bl : geopandas.GeoDataFrame
+        Bundesland polygons, used by ``add_bl_by_centroid()``.
+    distances : dict of str to float
+        Buffer distance in metres per Bundesland; entries ``<= 0`` are skipped.
+    grid : dict
+        Target grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean union of the buffered masks of all Bundesländer.
+    """
     out = np.zeros(grid["shape"], dtype=bool)
     tagged = add_bl_by_centroid(gdf, bl)
     if "BL" not in tagged.columns:
@@ -740,12 +905,40 @@ def variant_band_names(source_band: str, vname: str, min_fragment_area_ha: float
 # ---------------------------------------------------------------------------
 
 def _point_rows_cols(points: np.ndarray, transform: Affine) -> tuple[np.ndarray, np.ndarray]:
+    """Convert point coordinates to raster rows and columns.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        Coordinates of shape ``(N, 2)``.
+    transform : affine.Affine
+        Raster transform.
+
+    Returns
+    -------
+    rows : numpy.ndarray
+        Row indices (``int64``, floored).
+    cols : numpy.ndarray
+        Column indices (``int64``, floored).
+    """
     inv = ~transform
     cols_f, rows_f = inv * (points[:, 0], points[:, 1])
     return np.floor(rows_f).astype(np.int64), np.floor(cols_f).astype(np.int64)
 
 
 def building_points(buildings: gpd.GeoDataFrame) -> np.ndarray:
+    """Representative point of each building.
+
+    Parameters
+    ----------
+    buildings : geopandas.GeoDataFrame
+        Building geometries.
+
+    Returns
+    -------
+    numpy.ndarray
+        Coordinates of shape ``(N, 2)``; ``(0, 2)`` if ``buildings`` is empty.
+    """
     if buildings.empty:
         return np.zeros((0, 2), dtype=np.float64)
     return np.array([(p.x, p.y) for p in buildings.geometry.representative_point()], dtype=np.float64)
@@ -764,6 +957,20 @@ def sample_mask_at_points(mask: np.ndarray, points: np.ndarray, grid: dict) -> n
 
 
 def _building_count_grid(buildings: gpd.GeoDataFrame, grid: dict) -> np.ndarray:
+    """Count buildings per grid cell.
+
+    Parameters
+    ----------
+    buildings : geopandas.GeoDataFrame
+        Building geometries; counted at their representative point.
+    grid : dict
+        Target grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``uint16`` count per cell; points outside the grid are ignored.
+    """
     if buildings.empty:
         return np.zeros(grid["shape"], dtype=np.uint16)
     pts = building_points(buildings)
@@ -776,6 +983,20 @@ def _building_count_grid(buildings: gpd.GeoDataFrame, grid: dict) -> np.ndarray:
 
 
 def _rasterize_points(gdf: gpd.GeoDataFrame, grid: dict) -> np.ndarray:
+    """Rasterise the representative point of each feature.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Features.
+    grid : dict
+        Target grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, ``True`` in every cell that contains a point.
+    """
     if gdf.empty:
         return np.zeros(grid["shape"], dtype=bool)
     pts = gdf.geometry.representative_point()
@@ -937,6 +1158,23 @@ def address_cluster_mask(
 # ---------------------------------------------------------------------------
 
 def rule_distance(name: str, mode: str, total_height_m: float) -> float:
+    """Buffer distance of an infrastructure rule.
+
+    Parameters
+    ----------
+    name : str
+        Key in ``INFRA_RULES``.
+    mode : str
+        ``"standard"`` or ``"minimum"``.
+    total_height_m : float
+        Total turbine height, used by the placeholders ``"h"`` and
+        ``"max(h,100)"``.
+
+    Returns
+    -------
+    float
+        The distance in metres.
+    """
     val = INFRA_RULES[name][mode]
     if val == "max(h,100)":
         return max(total_height_m, 100.0)
@@ -962,6 +1200,21 @@ def _voltage_tokens_kv(voltage: object) -> set[int]:
 
 
 def _non_tunnel_mask(gdf: gpd.GeoDataFrame) -> np.ndarray:
+    """Mark features that are not tunnels.
+
+    Only the OSM ``tunnel`` tag is checked.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Line features.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array, ``True`` where ``tunnel`` is empty, ``no``, ``false`` or
+        ``0``; all ``True`` if the column is missing.
+    """
     if gdf.empty or "tunnel" not in gdf.columns:
         return np.ones(len(gdf), dtype=bool)
     tunnel = gdf["tunnel"].fillna("").astype(str).str.lower().str.strip()
@@ -969,6 +1222,22 @@ def _non_tunnel_mask(gdf: gpd.GeoDataFrame) -> np.ndarray:
 
 
 def _power_line_mask(power: gpd.GeoDataFrame, allowed_kv: set[int]) -> np.ndarray:
+    """Select power lines of the given voltages.
+
+    Parameters
+    ----------
+    power : geopandas.GeoDataFrame
+        OSM power features.
+    allowed_kv : set of int
+        Accepted voltages in kV.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean array, ``True`` for (Multi)LineStrings tagged ``power=line``
+        (if the column exists) with at least one voltage token in
+        ``allowed_kv``.
+    """
     if power.empty:
         return np.zeros(0, dtype=bool)
     geom_ok = power.geometry.geom_type.isin(["LineString", "MultiLineString"]).to_numpy()
@@ -1135,6 +1404,20 @@ def build_airport_corridor_masks(cfg: dict, grid: dict, args) -> dict[str, np.nd
 # ---------------------------------------------------------------------------
 
 def build_valid_area_mask(cfg: dict, grid: dict) -> np.ndarray:
+    """Mask of the area covered by the administrative boundaries.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    grid : dict
+        Target grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask; all ``True`` if no boundaries are found.
+    """
     admin = admin_boundaries(cfg, grid["bounds"])
     if admin.empty:
         return np.ones(grid["shape"], dtype=bool)
@@ -1206,6 +1489,23 @@ def _build_osm_nature_mask(cfg: dict, grid: dict, args) -> np.ndarray:
 
 
 def build_nature_masks(cfg: dict, grid: dict, args) -> dict[str, np.ndarray]:
+    """Build the official and the OSM nature-protection masks.
+
+    Parameters
+    ----------
+    cfg : dict
+        Loaded config.
+    grid : dict
+        Target grid.
+    args : argparse.Namespace
+        Needs ``osm_pbf`` and ``osm_pbf_cache_dir``.
+
+    Returns
+    -------
+    dict of str to numpy.ndarray
+        The masks ``nature_protection_areas`` and
+        ``osm_nature_protection_areas``.
+    """
     return {
         "nature_protection_areas": _build_official_nature_mask(cfg, grid),
         "osm_nature_protection_areas": _build_osm_nature_mask(cfg, grid, args),
@@ -1213,6 +1513,25 @@ def build_nature_masks(cfg: dict, grid: dict, args) -> dict[str, np.ndarray]:
 
 
 def _read_raster_on_grid(path: Path, grid: dict, resampling: Resampling, dst_nodata=np.nan) -> np.ndarray:
+    """Read band 1 of a raster, reprojected onto the target grid.
+
+    Parameters
+    ----------
+    path : Path
+        Source raster.
+    grid : dict
+        Target grid.
+    resampling : rasterio.enums.Resampling
+        Resampling method.
+    dst_nodata : float, optional
+        Fill value, default ``nan``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``float32`` array of the grid's shape; all ``dst_nodata`` if ``path``
+        does not exist.
+    """
     arr = np.full(grid["shape"], dst_nodata, dtype=np.float32)
     if not path.exists():
         return arr
@@ -1383,6 +1702,19 @@ def uncertainty_blur(mask: np.ndarray, grid: dict, sigma_m: float) -> np.ndarray
 # ---------------------------------------------------------------------------
 
 def layer_profile(grid: dict) -> dict:
+    """Rasterio profile of a checkpoint layer.
+
+    Parameters
+    ----------
+    grid : dict
+        Target grid.
+
+    Returns
+    -------
+    dict
+        Single-band ``uint8`` GeoTIFF profile, deflate-compressed, tiled,
+        nodata 0.
+    """
     return {
         "driver": "GTiff",
         "height": grid["shape"][0],
@@ -1398,10 +1730,44 @@ def layer_profile(grid: dict) -> dict:
 
 
 def layer_path(layer_dir: Path, name: str) -> Path:
+    """Path of a checkpoint layer.
+
+    Parameters
+    ----------
+    layer_dir : Path
+        Layer directory.
+    name : str
+        Layer name.
+
+    Returns
+    -------
+    Path
+        ``layer_dir / "<name>.tif"``.
+    """
     return layer_dir / f"{name}.tif"
 
 
 def layer_done(path: Path, name: str, grid: dict, extra_ok: Callable[[dict], bool] | None = None) -> bool:
+    """Check whether a checkpoint layer exists and matches the grid.
+
+    Parameters
+    ----------
+    path : Path
+        Checkpoint file.
+    name : str
+        Expected band description.
+    grid : dict
+        Expected grid (shape, CRS, transform).
+    extra_ok : callable, optional
+        Additional check on the file's tags.
+
+    Returns
+    -------
+    bool
+        ``True`` if the file has one band with matching shape, CRS, transform
+        and description, and ``extra_ok`` (if given) accepts its tags. Any
+        exception while reading counts as ``False``.
+    """
     if not path.exists():
         return False
     try:
@@ -1423,6 +1789,21 @@ def layer_done(path: Path, name: str, grid: dict, extra_ok: Callable[[dict], boo
 
 
 def write_layer(path: Path, name: str, arr: np.ndarray, grid: dict, extra_tags: dict | None = None) -> None:
+    """Write a checkpoint layer.
+
+    Parameters
+    ----------
+    path : Path
+        Target file; parent directories are created.
+    name : str
+        Band description and ``LAYER_NAME`` tag.
+    arr : numpy.ndarray
+        Mask, written as ``uint8``.
+    grid : dict
+        Target grid.
+    extra_tags : dict, optional
+        Tags added to ``LAYER_NAME`` and ``DISTANCE_ENGINE``.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(path, "w", **layer_profile(grid)) as dst:
         dst.write(arr.astype("uint8"), 1)
@@ -1434,6 +1815,18 @@ def write_layer(path: Path, name: str, arr: np.ndarray, grid: dict, extra_tags: 
 
 
 def read_layer_mask(path: Path) -> np.ndarray:
+    """Read band 1 of a layer as a boolean mask.
+
+    Parameters
+    ----------
+    path : Path
+        Layer file.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask.
+    """
     with rasterio.open(path) as src:
         return src.read(1).astype(bool)
 
@@ -1448,6 +1841,32 @@ def ensure_group_layers(
     extra_ok: Callable[[dict], bool] | None = None,
     extra_tags: dict | None = None,
 ) -> None:
+    """Build and write a group of checkpoint layers unless all are done.
+
+    A layer counts as done if ``layer_done()`` accepts it and ``force`` is not
+    set. If any layer of the group is missing, ``build_fn`` runs once and
+    only the missing layers are written; the others are kept.
+
+    Parameters
+    ----------
+    layer_dir : Path
+        Layer directory.
+    names : list of str
+        Layer names of the group.
+    build_label : str
+        Label for progress messages.
+    build_fn : callable
+        Returns a dict of masks by layer name; a missing name is written as an
+        empty mask.
+    grid : dict
+        Target grid.
+    force : bool
+        Rebuild all layers of the group.
+    extra_ok : callable, optional
+        Additional tag check passed to ``layer_done()``.
+    extra_tags : dict, optional
+        Tags passed to ``write_layer()``.
+    """
     missing = [name for name in names if force or not layer_done(layer_path(layer_dir, name), name, grid, extra_ok)]
     if not missing:
         print(f"[skip]  {build_label}: all {len(names)} layers already done", flush=True)
@@ -1467,6 +1886,25 @@ def ensure_group_layers(
 
 
 def output_profile(path: Path, grid: dict, band_count: int) -> dict:
+    """Rasterio profile of the multi-band output GeoTIFF.
+
+    Creates the parent directory of ``path``.
+
+    Parameters
+    ----------
+    path : Path
+        Output file.
+    grid : dict
+        Target grid.
+    band_count : int
+        Number of bands.
+
+    Returns
+    -------
+    dict
+        ``uint8`` GeoTIFF profile, deflate-compressed, tiled, band-interleaved,
+        nodata 0.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     return {
         "driver": "GTiff",
