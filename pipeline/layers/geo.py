@@ -306,6 +306,17 @@ def _prep_inputs() -> list[Path]:
 
 
 def _fingerprint_tag() -> str:
+    """Fingerabdruck der Eingaben dieser Stufe als Tag-Wert.
+
+    SHA-256 über ``pipeline.fingerprint.compute()`` der Eingaben aus
+    ``_prep_inputs()``; wird als ``PREP_FINGERPRINT``-Tag in die Checkpoints
+    dieser Stufe geschrieben.
+
+    Returns
+    -------
+    str
+        Hexdigest.
+    """
     data = fingerprint.compute(_prep_inputs())
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -460,6 +471,20 @@ def _build_osm_nature_mask(grid: dict) -> np.ndarray:
 
 
 def build_nature_masks(grid: dict) -> dict[str, np.ndarray]:
+    """Baut die beiden Natur-Masken.
+
+    Parameters
+    ----------
+    grid : dict
+        Zielraster.
+
+    Returns
+    -------
+    dict of str to numpy.ndarray
+        Die Masken ``nature_protection_areas`` (aus
+        ``_build_official_nature_mask()``) und ``osm_nature_protection_areas``
+        (aus ``_build_osm_nature_mask()``).
+    """
     return {
         "nature_protection_areas": _build_official_nature_mask(grid),
         "osm_nature_protection_areas": _build_osm_nature_mask(grid),
@@ -698,6 +723,19 @@ def build_appended_source_aggregates(grid: dict, out_dir: Path) -> dict[str, np.
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente der Layer-Stufe ``geo``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``config``, ``source_dir`` (seit W6.1 wirkungslos), ``out_dir`` (Vorgabe
+        ``contract.DERIVED_LAYERS``), ``bbox`` und ``force_layers``.
+    """
     p = argparse.ArgumentParser(
         description=(
             "Layer-Stufe W2.4: Natur, Gelände, Zonen und Puffer - die 17 "
@@ -778,6 +816,25 @@ def _check_required_sources(source_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Baut die Checkpoints der Layer-Stufe ``geo``.
+
+    Prüft zuerst mit ``_check_required_sources()``, dass die Quell-Checkpoints
+    aus ``hig`` und ``osm`` vorliegen. Baut dann über ``ensure_group_layers()``
+    nacheinander HiG-Familie, Puffer, Natur, Geografie, Gewässer, amtliche
+    Windzonen, WKA-Bestand und die angehängten Bänder 39, 42-44. Eine Gruppe
+    wird übersprungen, wenn ihre Checkpoints vorliegen und die Tags
+    (``PREP_FINGERPRINT``, ``BAND_SCHEMA``) passen, außer mit ``--force-layers``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn externe Quell-Checkpoints unter ``derived/layers/`` fehlen.
+    """
     args = parse_args(argv)
     cfg = load_config(args.config)
     grid = load_grid(cfg, args.bbox)

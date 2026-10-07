@@ -220,6 +220,14 @@ PREP_INPUT_KEYS = [
 ]
 
 def _prep_inputs() -> list[Path]:
+    """Die acht tatsächlich gelesenen ``b_layers``-Parquets dieser Stufe.
+
+    Returns
+    -------
+    list of Path
+        Je ein Pfad ``<key>.parquet`` unter ``contract.PREP["osm"]["b_layers"]``
+        für jeden Schlüssel in ``PREP_INPUT_KEYS``.
+    """
     b_dir = contract.PREP["osm"]["b_layers"]
     return [b_dir / f"{key}.parquet" for key in PREP_INPUT_KEYS]
 
@@ -317,6 +325,21 @@ def _require_hig_layers(legacy_cover_dir: Path) -> None:
 
 
 def _official_cover_mask(grid: dict, legacy_cover_dir: Path) -> np.ndarray:
+    """Vereinigung der HiG-Vorbedingungs-Checkpoints.
+
+    Parameters
+    ----------
+    grid : dict
+        Zielraster.
+    legacy_cover_dir : Path
+        Seit W6.1 wirkungslos; nur für die Fehlermeldung von
+        ``_cover_layer_path()``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Maske, ODER-verknüpft über alle Layer in ``OFFICIAL_COVER_LAYERS``.
+    """
     mask = np.zeros(grid["shape"], dtype=bool)
     for name in OFFICIAL_COVER_LAYERS:
         mask |= read_layer_mask(_cover_layer_path(name, legacy_cover_dir))
@@ -324,6 +347,22 @@ def _official_cover_mask(grid: dict, legacy_cover_dir: Path) -> np.ndarray:
 
 
 def _as_mask(gdf: gpd.GeoDataFrame, grid: dict, label: str) -> np.ndarray:
+    """Rastert einen GeoDataFrame ohne Puffer auf das Zielraster.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Zu rasternde Geometrien.
+    grid : dict
+        Zielraster.
+    label : str
+        Bezeichnung, an ``raster_mask()`` durchgereicht.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Maske; leer (alles ``False``), wenn ``gdf`` leer ist.
+    """
     if gdf.empty:
         return np.zeros(grid["shape"], dtype=bool)
     return raster_mask(gpd.GeoDataFrame(gdf, geometry="geometry", crs=TARGET_CRS), 0.0, grid, label)
@@ -563,6 +602,20 @@ def build_airport_corridor_masks(cfg: dict, grid: dict, args: argparse.Namespace
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente der Layer-Stufe ``osm``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``config``, ``legacy_cover_dir`` (seit W6.1 wirkungslos), ``bbox``, ``mode``
+        und ``total_height_m`` (beide mit heutigem ``INFRA_RULES`` wirkungslos),
+        ``force_layers`` und ``skip_infra``.
+    """
     p = argparse.ArgumentParser(
         description="OSM-Restlayer (Seilbahnen, sonstige Gebäude) + Infrastruktur/Flughäfen für "
         "die Widmungs-Abschichtung v2 - Layer-Stufe, liest aus derived/prep/osm/b_layers/."
@@ -600,6 +653,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Baut die Checkpoints der Layer-Stufe ``osm``.
+
+    Prüft mit ``_require_hig_layers()``, dass die HiG-Checkpoints vorliegen, und
+    baut dann über ``ensure_group_layers()`` die Gebäudeklassifikation samt
+    angehängten Bändern 40/41 sowie, ohne ``--skip-infra``, die Infrastruktur-
+    und Flughafenmasken. Eine Gruppe wird übersprungen, wenn ihre Checkpoints
+    vorliegen und die Tags passen, außer mit ``--force-layers``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn HiG-Checkpoints unter ``derived/layers/`` fehlen.
+    """
     args = parse_args(argv)
     with timed("load config/grid"):
         cfg = load_config(args.config)

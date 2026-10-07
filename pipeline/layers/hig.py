@@ -255,6 +255,17 @@ def _prep_inputs() -> list[Path]:
 
 
 def _fingerprint_tag() -> str:
+    """Fingerabdruck der Eingaben dieser Stufe als Tag-Wert.
+
+    SHA-256 über ``pipeline.fingerprint.compute()`` der Eingaben aus
+    ``_prep_inputs()``; wird als ``PREP_FINGERPRINT``-Tag in die Checkpoints
+    dieser Stufe geschrieben.
+
+    Returns
+    -------
+    str
+        Hexdigest.
+    """
     data = fingerprint.compute(_prep_inputs())
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -380,6 +391,23 @@ def build_sources(cfg: dict, grid: dict, args: argparse.Namespace, out_dir: Path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente der Layer-Stufe ``hig``.
+
+    Die Vorgaben der Eingabeverzeichnisse zeigen auf die Prep-Ausgaben
+    (``widmung``, ``noe_sekrop``, ``kataster``, ``adressen``), ``--address-dir`` auf
+    den Rohpfad des Adressregisters. Die Schwellwerte haben die ``HIG_*``-
+    Konstanten als Vorgabe.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        Die geparsten Argumente.
+    """
     p = argparse.ArgumentParser(
         description=(
             "Layer-Stufe W2.1: Widmung und Häuser im Grünen - die sieben "
@@ -454,6 +482,18 @@ def _params_tag(args: argparse.Namespace) -> dict[str, str]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Baut die sieben Checkpoints der Layer-Stufe ``hig``.
+
+    Ruft ``build_sources()`` über ``ensure_group_layers()`` auf. Die Gruppe wird
+    übersprungen, wenn alle Checkpoints vorliegen und ihre Tags (Parameter aus
+    ``_params_tag()`` und ``PREP_FINGERPRINT``) passen, außer mit
+    ``--force-layers``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+    """
     args = parse_args(argv)
     with timed("load config/grid"):
         cfg = load_config(args.config)
