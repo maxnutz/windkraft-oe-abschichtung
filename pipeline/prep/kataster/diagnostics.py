@@ -102,11 +102,32 @@ RASTER_CATEGORY_IDS = {cat: idx + 1 for idx, cat in enumerate(RASTER_CATEGORIES)
 
 
 def category_base(cat: str) -> str:
+    """Strip the ``(historisch)`` suffix from a category.
+
+    Parameters
+    ----------
+    cat : str
+        Category text from the symbol table.
+
+    Returns
+    -------
+    str
+        The trimmed category, or ``"Unbekannt"`` if empty.
+    """
     cat = (cat or "").strip()
     return re.sub(r"\s*\(historisch\)\s*", "", cat).strip() or "Unbekannt"
 
 
 def load_symbol_categories() -> dict[str, str]:
+    """Map NS symbols to their base category.
+
+    Reads the ``NS`` rows of ``SYMBOL_CSV``.
+
+    Returns
+    -------
+    dict of str to str
+        Symbol to category from ``category_base()``.
+    """
     mapping: dict[str, str] = {}
     with SYMBOL_CSV.open("r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f, delimiter=";"):
@@ -116,6 +137,18 @@ def load_symbol_categories() -> dict[str, str]:
 
 
 def iter_pairs_from_bytes(raw: bytes):
+    """Iterate over the group-code/value line pairs of a DXF file.
+
+    Parameters
+    ----------
+    raw : bytes
+        DXF content, decoded as latin-1.
+
+    Yields
+    ------
+    tuple of str
+        ``(code, value)``, both stripped; an unpaired last line is dropped.
+    """
     lines = raw.decode("latin1", errors="replace").splitlines()
     it = iter(lines)
     for code in it:
@@ -420,11 +453,38 @@ def parse_dxf(raw: bytes, line_layers: set[str], bounds_only: bool = False):
 
 
 def rgb(hex_color: str) -> tuple[int, int, int, int]:
+    """Convert a hex colour to RGBA with alpha 220.
+
+    Parameters
+    ----------
+    hex_color : str
+        Colour as ``"#rrggbb"`` or ``"rrggbb"``.
+
+    Returns
+    -------
+    tuple of int
+        ``(r, g, b, 220)``.
+    """
     h = hex_color.lstrip("#")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 220)
 
 
 def choose_raw_crs(bounds: tuple[float, float, float, float] | None):
+    """Pick the Gauß-Krüger strip of raw NÖ DXF coordinates.
+
+    Parameters
+    ----------
+    bounds : tuple of float or None
+        Raw ``(minx, miny, maxx, maxy)``.
+
+    Returns
+    -------
+    strip : str
+        ``"M31"`` if the x-centre exceeds 75 000, else ``"M34"`` (also without
+        bounds).
+    transformer : pyproj.Transformer
+        The matching entry of ``TRANSFORMERS_TO_LAMBERT``.
+    """
     if not bounds:
         return "M34", TRANSFORMERS_TO_LAMBERT["M34"]
     minx, _miny, maxx, _maxy = bounds
@@ -438,6 +498,18 @@ def choose_raw_crs(bounds: tuple[float, float, float, float] | None):
 
 
 def transform_bounds(bounds: tuple[float, float, float, float] | None):
+    """Transform raw DXF bounds to EPSG:31287.
+
+    Parameters
+    ----------
+    bounds : tuple of float or None
+        Raw ``(minx, miny, maxx, maxy)``.
+
+    Returns
+    -------
+    tuple of float or None
+        Bounds of the four transformed corners, or ``None`` without bounds.
+    """
     if not bounds:
         return None
     minx, miny, maxx, maxy = bounds
@@ -447,6 +519,22 @@ def transform_bounds(bounds: tuple[float, float, float, float] | None):
 
 
 def transform_polygon(poly: Polygon, tr: Transformer):
+    """Transform the rings of a polygon.
+
+    Parameters
+    ----------
+    poly : shapely.geometry.Polygon
+        Polygon in source coordinates.
+    tr : pyproj.Transformer
+        Coordinate transformer.
+
+    Returns
+    -------
+    exterior : list of tuple
+        Transformed exterior coordinates.
+    interiors : list of list of tuple
+        Transformed coordinates of each interior ring.
+    """
     x, y = poly.exterior.xy
     tx, ty = tr.transform(x, y)
     exterior = list(zip(tx, ty))
@@ -491,6 +579,18 @@ def pix_coords(coords, minx: float, maxy: float, px: float):
 
 
 def bounds_intersect(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    """Check whether two bounding boxes intersect (edges included).
+
+    Parameters
+    ----------
+    a, b : tuple of float
+        ``(minx, miny, maxx, maxy)``.
+
+    Returns
+    -------
+    bool
+        ``True`` if the boxes overlap or touch.
+    """
     return a[0] <= b[2] and a[2] >= b[0] and a[1] <= b[3] and a[3] >= b[1]
 
 
@@ -503,6 +603,26 @@ def make_tile_jobs(
     tile_size_m: float,
     halo_m: float,
 ) -> list[tuple[int, tuple[float, float, float, float], tuple[float, float, float, float], list[str]]]:
+    """Split an extent into square tiles and assign DXF files to each.
+
+    Parameters
+    ----------
+    file_infos : list of tuple
+        ``(name, bounds)`` per DXF file.
+    minx, miny, maxx, maxy : float
+        Extent to tile.
+    tile_size_m : float
+        Tile edge length in metres.
+    halo_m : float
+        Overlap added around each tile.
+
+    Returns
+    -------
+    list of tuple
+        ``(tile_id, inner_bounds, halo_bounds, names)`` for every tile whose
+        halo intersects at least one file; ``tile_id`` counts all tiles,
+        including skipped ones.
+    """
     jobs = []
     tile_id = 0
     x = minx
@@ -523,12 +643,42 @@ def make_tile_jobs(
 
 
 def default_bounds_cache_path(line_layers: set[str], raw_coordinates: bool) -> Path:
+    """Default path of the DXF bounds cache.
+
+    Parameters
+    ----------
+    line_layers : set of str
+        DXF line layers; part of the file name.
+    raw_coordinates : bool
+        Whether bounds are raw or EPSG:31287; part of the file name.
+
+    Returns
+    -------
+    Path
+        ``OUT_DIR / "noe_dkm_bounds_<layers>_<raw|epsg31287>.csv"``.
+    """
     layers_key = "_".join(sorted(re.sub(r"[^A-Za-z0-9]+", "_", layer) for layer in line_layers))
     coord_key = "raw" if raw_coordinates else "epsg31287"
     return OUT_DIR / f"noe_dkm_bounds_{layers_key}_{coord_key}.csv"
 
 
 def read_bounds_cache(path: Path, names: list[str]):
+    """Read DXF bounds from the cache.
+
+    Parameters
+    ----------
+    path : Path
+        Cache CSV.
+    names : list of str
+        DXF file names that must all be present.
+
+    Returns
+    -------
+    tuple or None
+        ``(overall_bounds, coverage_bounds, file_infos, source_file_stats)``;
+        ``None`` if the file is missing, unreadable (a warning is printed) or
+        lacks any of ``names``.
+    """
     if not path.exists():
         return None
     wanted = set(names)
@@ -573,6 +723,17 @@ def read_bounds_cache(path: Path, names: list[str]):
 
 
 def write_bounds_cache(path: Path, rows: list[tuple[str, tuple[float, float, float, float], str | None]]) -> None:
+    """Write the DXF bounds cache.
+
+    Writes to a temporary file first and then replaces ``path``.
+
+    Parameters
+    ----------
+    path : Path
+        Cache CSV; the parent directory is created.
+    rows : list of tuple
+        ``(name, bounds, strip)`` per DXF file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with tmp_path.open("w", encoding="utf-8", newline="") as f:
@@ -584,6 +745,21 @@ def write_bounds_cache(path: Path, rows: list[tuple[str, tuple[float, float, flo
 
 
 def transform_line(line: LineString, tr: Transformer) -> LineString | None:
+    """Transform a line string.
+
+    Parameters
+    ----------
+    line : shapely.geometry.LineString
+        Line in source coordinates.
+    tr : pyproj.Transformer
+        Coordinate transformer.
+
+    Returns
+    -------
+    shapely.geometry.LineString or None
+        Transformed line; ``None`` for fewer than two points, an invalid
+        result, or zero length.
+    """
     coords = list(line.coords)
     if len(coords) < 2:
         return None
@@ -599,6 +775,18 @@ def transform_line(line: LineString, tr: Transformer) -> LineString | None:
 
 
 def polygons_from_geometry(geom) -> list[Polygon]:
+    """Split a geometry into its polygons.
+
+    Parameters
+    ----------
+    geom : shapely.geometry.base.BaseGeometry
+        Polygon, MultiPolygon or GeometryCollection (recursive).
+
+    Returns
+    -------
+    list of shapely.geometry.Polygon
+        Non-empty polygons; empty for other geometry types.
+    """
     if geom.is_empty:
         return []
     if isinstance(geom, Polygon):
@@ -668,6 +856,18 @@ def assign_points_to_polygons(polys: list[Polygon], points: list[Point]) -> dict
 
 
 def rgba_lookup(diag: bool = False) -> np.ndarray:
+    """Lookup table from raster category code to RGBA.
+
+    Parameters
+    ----------
+    diag : bool, optional
+        If ``True``, code 0 is transparent instead of ``BACKGROUND_RGBA``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``uint8`` array of shape ``(len(RASTER_CATEGORIES) + 1, 4)``.
+    """
     lookup = np.zeros((len(RASTER_CATEGORIES) + 1, 4), dtype=np.uint8)
     lookup[0] = BACKGROUND_RGBA
     for cat, idx in RASTER_CATEGORY_IDS.items():
@@ -681,6 +881,22 @@ def rgba_lookup(diag: bool = False) -> np.ndarray:
 
 
 def rasterize_codes(shapes, out_shape: tuple[int, int], transform) -> np.ndarray:
+    """Rasterise ``(geometry, code)`` pairs with ``all_touched=True``.
+
+    Parameters
+    ----------
+    shapes : sequence
+        ``(geometry, code)`` pairs.
+    out_shape : tuple of int
+        ``(height, width)``.
+    transform : affine.Affine
+        Raster transform.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``uint8`` codes, 0 where nothing is drawn.
+    """
     if not shapes:
         return np.zeros(out_shape, dtype=np.uint8)
     return rasterio_rasterize(
@@ -701,6 +917,18 @@ _WORKER_FILE_CACHE = None
 
 
 def flatten_linework(geom) -> list[LineString]:
+    """Flatten a geometry into its line strings.
+
+    Parameters
+    ----------
+    geom : shapely.geometry.base.BaseGeometry
+        LineString or a multi-part geometry (recursive).
+
+    Returns
+    -------
+    list of shapely.geometry.LineString
+        The line strings; empty for other geometry types.
+    """
     if geom.is_empty:
         return []
     if isinstance(geom, LineString):
@@ -714,6 +942,25 @@ def flatten_linework(geom) -> list[LineString]:
 
 
 def load_noe_boundary_lines(boundary_path: Path) -> list[LineString]:
+    """Load the outline of Niederösterreich as line strings.
+
+    Parameters
+    ----------
+    boundary_path : Path
+        Administrative boundary file; reprojected to EPSG:31287 (assumed if
+        unset) and filtered to ``BL`` containing "Nieder" if that column
+        exists.
+
+    Returns
+    -------
+    list of shapely.geometry.LineString
+        Boundary of the union of the selected geometries.
+
+    Raises
+    ------
+    SystemExit
+        If geopandas cannot be imported or no geometries remain.
+    """
     try:
         import geopandas as gpd
     except Exception as e:
@@ -733,6 +980,17 @@ def load_noe_boundary_lines(boundary_path: Path) -> list[LineString]:
 
 
 def _init_bounds_worker(zip_path, line_layers, raw_coordinates):
+    """Initialise a worker process for the bounds pass.
+
+    Parameters
+    ----------
+    zip_path : Path
+        NÖ DXF ZIP, opened once per worker.
+    line_layers : set of str
+        DXF line layers.
+    raw_coordinates : bool
+        Keep raw coordinates instead of transforming to EPSG:31287.
+    """
     global _BOUNDS_WORKER_ZIP, _BOUNDS_WORKER_CFG
     _BOUNDS_WORKER_ZIP = zipfile.ZipFile(zip_path)
     _BOUNDS_WORKER_CFG = {
@@ -742,6 +1000,19 @@ def _init_bounds_worker(zip_path, line_layers, raw_coordinates):
 
 
 def _process_file_for_bounds(name: str):
+    """Compute the bounds of one DXF file in a worker.
+
+    Parameters
+    ----------
+    name : str
+        Member name in the ZIP.
+
+    Returns
+    -------
+    tuple
+        ``(name, raw_bounds, target_bounds, strip)``; ``strip`` is ``None``
+        without bounds.
+    """
     raw = _BOUNDS_WORKER_ZIP.read(name)
     b = parse_dxf_bounds_fast(raw, _BOUNDS_WORKER_CFG["line_layers"])
     tb = b if _BOUNDS_WORKER_CFG["raw_coordinates"] else transform_bounds(b)
@@ -766,6 +1037,42 @@ def _init_worker(
     worker_cache_files,
     boundary_lines,
 ):
+    """Initialise a worker process for polygonisation.
+
+    Opens the ZIP once per worker, stores all parameters in ``_WORKER_CFG``
+    and resets the per-worker file cache.
+
+    Parameters
+    ----------
+    zip_path : Path
+        NÖ DXF ZIP.
+    line_layers : set of str
+        DXF line layers for polygonisation.
+    sym_cat : dict of str to str
+        NS symbol to category.
+    precision_m : float
+        Snapping precision.
+    min_area_m2 : float
+        Minimum polygon area.
+    raw_coordinates : bool
+        Keep raw coordinates.
+    minx, maxy : float
+        Upper-left corner of the canvas.
+    px : float
+        Pixel size in metres.
+    highlight_unassigned : bool
+        Highlight polygons without NS symbol.
+    diagnostics : bool
+        Produce the diagnostics map.
+    no_clear_holes : bool
+        Do not clear interior rings.
+    render_final : bool
+        Produce the final map.
+    worker_cache_files : int
+        Size of the per-worker DXF cache.
+    boundary_lines : list of shapely.geometry.LineString
+        Extra linework for closing border polygons.
+    """
     global _WORKER_ZIP, _WORKER_CFG, _WORKER_FILE_CACHE
     _WORKER_ZIP = zipfile.ZipFile(zip_path)
     _WORKER_CFG = {
@@ -910,6 +1217,25 @@ def _process_file_for_render(name: str):
 
 
 def _append_projected_polygon(draw_by_cat, cat: str, poly: Polygon, cfg) -> bool:
+    """Add a polygon, converted to pixel rings, to a category group.
+
+    Parameters
+    ----------
+    draw_by_cat : dict of str to list
+        Draw groups by category; receives ``(area, exterior_px, holes_px)``.
+    cat : str
+        Category.
+    poly : shapely.geometry.Polygon
+        Polygon in map coordinates.
+    cfg : dict
+        Needs ``minx``, ``maxy`` and ``px``.
+
+    Returns
+    -------
+    bool
+        ``False`` if the exterior has fewer than 3 pixel points (nothing
+        added), else ``True``. Holes with fewer than 3 points are dropped.
+    """
     exterior_px = pix_coords(list(poly.exterior.coords), cfg["minx"], cfg["maxy"], cfg["px"])
     if len(exterior_px) < 3:
         return False
@@ -1129,6 +1455,25 @@ def _process_tile_for_raster(job):
 
 
 def paint_draw_groups(draw_by_cat, draw, diag_draw, highlight_unassigned: bool, no_clear_holes: bool):
+    """Paint grouped polygons onto the final and diagnostics images.
+
+    Polygons are drawn largest first, and each polygon's holes are cleared
+    to the background before smaller ones are drawn, so nested polygons are
+    not erased.
+
+    Parameters
+    ----------
+    draw_by_cat : dict of str to list
+        Draw groups from ``_append_projected_polygon()``.
+    draw : PIL.ImageDraw.ImageDraw or None
+        Final map.
+    diag_draw : PIL.ImageDraw.ImageDraw or None
+        Diagnostics map.
+    highlight_unassigned : bool
+        Also paint unassigned polygons on the final map.
+    no_clear_holes : bool
+        Do not clear interior rings.
+    """
     draw_order = DRAW_ORDER + (["Nicht zugeordnet"] if (highlight_unassigned or diag_draw is not None) else [])
     entries = []
     for cat in draw_order:
@@ -1159,6 +1504,22 @@ def paint_draw_groups(draw_by_cat, draw, diag_draw, highlight_unassigned: bool, 
 
 
 def paste_tile_raster(payload, img: Image.Image | None, diag_img: Image.Image | None, minx: float, maxy: float, px: float):
+    """Paste a rendered tile into the final and diagnostics images.
+
+    Parameters
+    ----------
+    payload : tuple
+        ``(inner_bounds, tile_width, tile_height, raw_bytes, diag_bytes)``;
+        the byte strings are ``uint8`` category codes.
+    img : PIL.Image.Image or None
+        Final map.
+    diag_img : PIL.Image.Image or None
+        Diagnostics map; only non-zero codes are pasted.
+    minx, maxy : float
+        Upper-left corner of the canvas.
+    px : float
+        Pixel size in metres.
+    """
     inner_bounds, tile_width, tile_height, raw_bytes, diag_bytes = payload
     col0 = int(round((inner_bounds[0] - minx) / px))
     row0 = int(round((maxy - inner_bounds[3]) / px))
@@ -1175,6 +1536,21 @@ def paste_tile_raster(payload, img: Image.Image | None, diag_img: Image.Image | 
 
 
 def reason_for_component(fractions: dict[str, float]) -> str:
+    """Classify a white residual component by its dominant cause.
+
+    Parameters
+    ----------
+    fractions : dict of str to float
+        Share of the component per cause.
+
+    Returns
+    -------
+    str
+        The first cause with a share of at least 0.5, in the order
+        unassigned, no polygon, outside coverage, classified in diagnostics;
+        then unassigned plus no polygon together; otherwise
+        ``"mixed_or_boundary_raster_effect"``.
+    """
     if fractions.get("unassigned", 0) >= 0.5:
         return "polygon_exists_without_ns_symbol"
     if fractions.get("no_polygon_gap", 0) >= 0.5:
@@ -1409,6 +1785,19 @@ def write_boundary_residual_diagnostics(
 
 
 def main() -> None:
+    """Render the NÖ DKM land-use overview from DXF linework and NS symbols.
+
+    Writes into ``OUT_DIR`` a raw PNG, the decorated map (unless
+    ``--diagnostics-only``), a diagnostics PNG (with ``--diagnostics``),
+    boundary residual diagnostics (with ``--boundary-diagnostics``) and a
+    statistics CSV.
+
+    Raises
+    ------
+    SystemExit
+        On incompatible option combinations, if no usable bounds or tile jobs
+        are found, or if the canvas would be too large.
+    """
     global _WORKER_ZIP, _WORKER_CFG, _WORKER_FILE_CACHE
 
     ap = argparse.ArgumentParser()
