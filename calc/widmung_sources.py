@@ -225,14 +225,56 @@ STMK_LEISURE_PREFIXES = {
 # ---------------------------------------------------------------------------
 
 def _v(col: str, values) -> dict:
+    """Build a ``values`` predicate (exact match against a set).
+
+    Parameters
+    ----------
+    col : str
+        Column to test.
+    values : iterable
+        Accepted values.
+
+    Returns
+    -------
+    dict
+        ``{"col": col, "values": set(values)}``.
+    """
     return {"col": col, "values": set(values)}
 
 
 def _sw(col: str, prefixes) -> dict:
+    """Build a ``startswith`` predicate.
+
+    Parameters
+    ----------
+    col : str
+        Column to test.
+    prefixes : iterable of str
+        Accepted prefixes.
+
+    Returns
+    -------
+    dict
+        ``{"col": col, "startswith": tuple(prefixes)}``.
+    """
     return {"col": col, "startswith": tuple(prefixes)}
 
 
 def _c(col: str, pattern: str) -> dict:
+    """Build a ``contains`` predicate (regular expression search).
+
+    Parameters
+    ----------
+    col : str
+        Column to test.
+    pattern : str
+        Regular expression.
+
+    Returns
+    -------
+    dict
+        ``{"col": col, "contains": pattern}``.
+    """
     return {"col": col, "contains": pattern}
 
 
@@ -400,6 +442,19 @@ def _ensure_ktn_gpkg(cache_dir: Path) -> Path:
 
 
 def _tirol_gpkg() -> Path:
+    """Locate the Tirol Flächenwidmung GeoPackage.
+
+    Returns
+    -------
+    Path
+        The first (sorted) ``FLW_Flaechenwidmung_*.gpkg`` under
+        ``data/widmung/tirol``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no such file exists.
+    """
     matches = sorted((WIDMUNG / "tirol").glob("FLW_Flaechenwidmung_*.gpkg"))
     if not matches:
         raise FileNotFoundError(f"no FLW_Flaechenwidmung_*.gpkg in {WIDMUNG / 'tirol'}")
@@ -407,6 +462,27 @@ def _tirol_gpkg() -> Path:
 
 
 def _read_raw(dataset_key: str, columns: list[str], cache_dir: Path) -> gpd.GeoDataFrame:
+    """Read one dataset from its OGD file, without filtering or reprojection.
+
+    Parameters
+    ----------
+    dataset_key : str
+        Key in ``DATASETS``.
+    columns : list of str
+        Columns to read.
+    cache_dir : Path
+        Cache directory for the extracted Kärnten GeoPackage.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        The raw features.
+
+    Raises
+    ------
+    ValueError
+        If ``dataset_key`` is unknown.
+    """
     if dataset_key == "bgld":
         return gpd.read_file(WIDMUNG / "burgenland" / "WIDMUNGSFLAECHEN.zip", layer="BGLD_FLAECHENWIDMUNG", columns=columns)
     if dataset_key == "ktn":
@@ -442,6 +518,23 @@ def clip_to_at_bbox(gdf: gpd.GeoDataFrame, label: str) -> gpd.GeoDataFrame:
 
 @functools.lru_cache(maxsize=1)
 def _read_dataset_cached(dataset_key: str, cache_dir_str: str) -> gpd.GeoDataFrame:
+    """Read a dataset, drop empty geometries, reproject and clip to Austria.
+
+    Only the most recent call is cached (``lru_cache(maxsize=1)``).
+
+    Parameters
+    ----------
+    dataset_key : str
+        Key in ``DATASETS``.
+    cache_dir_str : str
+        Cache directory as a string (hashable for the cache).
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Features in ``WORK_CRS`` with the columns from ``dataset_columns()``,
+        clipped by ``clip_to_at_bbox()``, with a fresh index.
+    """
     columns = dataset_columns(dataset_key)
     gdf = _read_raw(dataset_key, columns, Path(cache_dir_str))
     gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty].copy()
@@ -464,6 +557,28 @@ def read_dataset(dataset_key: str, cache_dir: Path) -> gpd.GeoDataFrame:
 # ---------------------------------------------------------------------------
 
 def predicate_mask(gdf: gpd.GeoDataFrame, pred: dict) -> pd.Series:
+    """Evaluate one match predicate against a GeoDataFrame.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        The dataset.
+    pred : dict
+        Predicate built by ``_v``, ``_sw`` or ``_c``.
+
+    Returns
+    -------
+    pandas.Series
+        Boolean mask. ``startswith`` and ``contains`` compare the column as
+        text with missing values treated as empty strings.
+
+    Raises
+    ------
+    KeyError
+        If the predicate column is missing.
+    ValueError
+        If the predicate kind is not supported.
+    """
     col = pred["col"]
     if col not in gdf.columns:
         raise KeyError(f"column {col!r} missing; available: {sorted(gdf.columns)}")
@@ -487,6 +602,22 @@ def source_mask(gdf: gpd.GeoDataFrame, source: dict) -> pd.Series:
 
 
 def sources_for_dataset(dataset_key: str, bucket: str | None = None, bl_filter: set[str] | None = None) -> list[dict]:
+    """Select the ``SOURCES`` entries of one dataset.
+
+    Parameters
+    ----------
+    dataset_key : str
+        Key in ``DATASETS``.
+    bucket : str, optional
+        Only sources of this bucket.
+    bl_filter : set of str, optional
+        Only sources whose dataset belongs to one of these Bundesländer.
+
+    Returns
+    -------
+    list of dict
+        Matching sources in ``SOURCES`` order.
+    """
     out = []
     for src in SOURCES:
         if src["dataset"] != dataset_key:
@@ -500,4 +631,16 @@ def sources_for_dataset(dataset_key: str, bucket: str | None = None, bl_filter: 
 
 
 def bundesland_of(source: dict) -> str:
+    """Bundesland of a source.
+
+    Parameters
+    ----------
+    source : dict
+        An entry of ``SOURCES``.
+
+    Returns
+    -------
+    str
+        ``DATASETS[source["dataset"]]["bundesland"]``.
+    """
     return DATASETS[source["dataset"]]["bundesland"]

@@ -64,6 +64,19 @@ INDUSTRIAL_EIGENSCHAFTEN = frozenset({EIGENSCHAFT_INDUSTRIE_LAGER})
 
 
 def _newest_zip(data_dir: Path) -> Path | None:
+    """Findet das jüngste Adressregister-ZIP.
+
+    Parameters
+    ----------
+    data_dir : Path
+        Verzeichnis mit den ZIPs
+        ``Adresse_Relationale_Tabellen_Stichtagsdaten_*.zip``.
+
+    Returns
+    -------
+    Path or None
+        Das nach Dateiname letzte ZIP, ``None``, wenn keines vorhanden ist.
+    """
     candidates = sorted(data_dir.glob("Adresse_Relationale_Tabellen_Stichtagsdaten_*.zip"))
     return candidates[-1] if candidates else None
 
@@ -139,8 +152,34 @@ def load_building_points(data_dir: Path, cache_dir: Path | None = None, rebuild:
 
 
 def residential_flags(eigenschaft: pd.Series | np.ndarray) -> np.ndarray:
+    """Markiert Gebäude mit Wohnnutzung.
+
+    Parameters
+    ----------
+    eigenschaft : pandas.Series or numpy.ndarray
+        ``GEBAEUDE.EIGENSCHAFT`` je Gebäude.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Array, ``True`` wo die Eigenschaft in ``RESIDENTIAL_EIGENSCHAFTEN``
+        liegt (Hotels bewusst nicht).
+    """
     return pd.Series(eigenschaft).isin(RESIDENTIAL_EIGENSCHAFTEN).to_numpy()
 
 
 def industrial_flags(eigenschaft: pd.Series | np.ndarray) -> np.ndarray:
+    """Markiert Gebäude mit Industrie- oder Lagernutzung.
+
+    Parameters
+    ----------
+    eigenschaft : pandas.Series or numpy.ndarray
+        ``GEBAEUDE.EIGENSCHAFT`` je Gebäude.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Array, ``True`` wo die Eigenschaft in ``INDUSTRIAL_EIGENSCHAFTEN``
+        liegt.
+    """
     return pd.Series(eigenschaft).isin(INDUSTRIAL_EIGENSCHAFTEN).to_numpy()

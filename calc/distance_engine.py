@@ -30,11 +30,35 @@ START_TIME = time.perf_counter()
 
 
 def log(message: str) -> None:
+    """Gibt eine Meldung mit der seit Modulimport vergangenen Zeit aus.
+
+    Parameters
+    ----------
+    message : str
+        Die Meldung.
+    """
     elapsed = time.perf_counter() - START_TIME
     print(f"[{elapsed:7.1f}s] {message}", flush=True)
 
 
 def ns_kind(ns: object, category: object) -> str | None:
+    """Ordnet ein DKM-Objekt nach ``ns`` und ``ns_category`` einer Art zu.
+
+    Parameters
+    ----------
+    ns : object
+        ``ns``-Wert; ein Präfix ``FIG`` wird entfernt, Zahlen werden als Ganzzahl
+        verglichen.
+    category : object
+        ``ns_category``-Wert, ohne Beachtung der Groß-/Kleinschreibung verglichen.
+
+    Returns
+    -------
+    str or None
+        ``"building"`` für ``ns`` 41 oder 66 oder eine Kategorie, die mit
+        "Baufläche" beginnt; ``"garden"`` für ``ns`` 52 oder 71 oder eine
+        Kategorie, die mit "Garten" beginnt; sonst ``None``.
+    """
     ns_text = "" if ns is None else str(ns).strip()
     ns_text = ns_text.upper().removeprefix("FIG")
     try:
@@ -50,6 +74,21 @@ def ns_kind(ns: object, category: object) -> str | None:
 
 
 def circular_kernel(buffer_m: float, cell_m: float) -> np.ndarray:
+    """Baut einen kreisförmigen Faltungskern.
+
+    Parameters
+    ----------
+    buffer_m : float
+        Radius in Metern.
+    cell_m : float
+        Zellgröße in Metern.
+
+    Returns
+    -------
+    numpy.ndarray
+        Quadratischer ``float32``-Kern der Kantenlänge
+        ``2 * ceil(buffer_m / cell_m) + 1``; 1 innerhalb des Radius, sonst 0.
+    """
     radius_px = float(buffer_m) / float(cell_m)
     extent = int(math.ceil(radius_px))
     y, x = np.ogrid[-extent : extent + 1, -extent : extent + 1]
@@ -64,6 +103,34 @@ def fft_circle_dilation(
     tile_size: int,
     label: str,
 ) -> np.ndarray:
+    """Dilatiert eine Maske um einen Kreis per FFT-Faltung, kachelweise.
+
+    Jede Kachel wird mit einem Rand von halber Kernbreite gefaltet; eine
+    Zelle gilt als gesetzt, wenn das Faltungsergebnis über 0.5 liegt.
+
+    Parameters
+    ----------
+    base : numpy.ndarray
+        Zu dilatierende Bool-Maske.
+    buffer_m : float
+        Pufferradius in Metern.
+    cell_m : float
+        Zellgröße in Metern.
+    tile_size : int
+        Kantenlänge einer Kachel in Pixeln.
+    label : str
+        Bezeichnung für die Fortschrittsmeldungen.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Maske in der Form von ``base``; leer, wenn ``base`` leer ist.
+
+    Raises
+    ------
+    SystemExit
+        Wenn ``tile_size`` nicht positiv ist.
+    """
     if not base.any():
         return np.zeros(base.shape, dtype=bool)
     if tile_size <= 0:

@@ -96,10 +96,33 @@ class CandidateScan:
     n_addressless_dropped: int = 0
 
     def __len__(self) -> int:
+        """Zahl der Kandidaten.
+
+        Returns
+        -------
+        int
+            ``len(self.geometries)``.
+        """
         return len(self.geometries)
 
 
 def _rows_cols(points: np.ndarray, transform: Affine) -> tuple[np.ndarray, np.ndarray]:
+    """Rechnet Punktkoordinaten in Rasterzeilen und -spalten um.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        Koordinaten der Form ``(N, 2)``.
+    transform : affine.Affine
+        Raster-Transformation.
+
+    Returns
+    -------
+    rows : numpy.ndarray
+        Zeilenindizes (``int64``, abgerundet).
+    cols : numpy.ndarray
+        Spaltenindizes (``int64``, abgerundet).
+    """
     inv = ~transform
     cols_f, rows_f = inv * (points[:, 0], points[:, 1])
     return np.floor(rows_f).astype(np.int64), np.floor(cols_f).astype(np.int64)
@@ -130,6 +153,20 @@ def sample_labels(labels: np.ndarray, points: np.ndarray, grid: dict) -> np.ndar
 
 
 def _within_bounds(xy: np.ndarray, bounds: tuple[float, float, float, float]) -> np.ndarray:
+    """Prüft je Punkt, ob er in einem Rechteck liegt.
+
+    Parameters
+    ----------
+    xy : numpy.ndarray
+        Koordinaten der Form ``(N, 2)``.
+    bounds : tuple of float
+        ``(minx, miny, maxx, maxy)``, Ränder eingeschlossen.
+
+    Returns
+    -------
+    numpy.ndarray
+        Bool-Array der Länge ``N``.
+    """
     minx, miny, maxx, maxy = bounds
     return (xy[:, 0] >= minx) & (xy[:, 0] <= maxx) & (xy[:, 1] >= miny) & (xy[:, 1] <= maxy)
 
