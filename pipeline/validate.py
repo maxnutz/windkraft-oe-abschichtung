@@ -636,6 +636,24 @@ def classify(result: BandResult, erlaubte_baender: set[str]) -> tuple[str, bool]
 # ---------------------------------------------------------------------------
 
 def _load_existing_register(path: Path) -> dict[tuple[str, str], list[str]]:
+    """Liest das bestehende Abweichungsregister.
+
+    Parameters
+    ----------
+    path : Path
+        Pfad der TSV-Datei (Vorgabe ``docs/rewrite/abweichungen.tsv``).
+
+    Returns
+    -------
+    dict of (str, str) to list of str
+        Zeilen, geschlüsselt nach ``(paket, band_name)``. Leer, wenn die Datei
+        nicht existiert. Zeilen mit falscher Spaltenzahl werden übergangen.
+
+    Raises
+    ------
+    ValueError
+        Wenn der Kopf der Datei nicht ``REGISTER_COLUMNS`` entspricht.
+    """
     if not path.exists():
         return {}
     rows: dict[tuple[str, str], list[str]] = {}
@@ -743,6 +761,18 @@ def write_register(path: Path, paket: str, results: list[BandResult], erlaubte_b
 # ---------------------------------------------------------------------------
 
 def _sha256(path: Path) -> str:
+    """``sha256`` einer Datei, blockweise gelesen.
+
+    Parameters
+    ----------
+    path : Path
+        Zu hashende Datei.
+
+    Returns
+    -------
+    str
+        Hexdigest.
+    """
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -755,6 +785,18 @@ def _sha256(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente der Validierung.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``paket`` (Pflicht), ``new_tif``, ``reference_tif`` und ``register``.
+    """
     p = argparse.ArgumentParser(
         description=(
             "Validierung W3.2: vergleicht ein finalisiertes TIF bandweise gegen "
@@ -778,6 +820,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Vergleicht ein finalisiertes TIF gegen die Referenz und schreibt das Register.
+
+    Beim Default-``new_tif`` endet der Lauf mit 0, wenn dessen ``sha256``
+    gleich ``AKTUELLE_REFERENZ_SHA256`` ist; dann findet kein bandweiser
+    Vergleich statt. Andernfalls werden alle Bänder gegen run1 gemessen,
+    nach der Ampel bewertet und ins Register geschrieben. Bewertet, entscheidet
+    nicht.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    int
+        0 bei bitgleichem TIF oder ohne rotes Band; 1, wenn run1 nicht
+        auflösbar ist oder mindestens ein Band rot bewertet wird.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn das neue TIF, die angegebene Referenz oder das Manifest fehlt.
+    """
     args = parse_args(argv)
     new_tif = Path(args.new_tif) if args.new_tif else contract.PRODUCTS["abschichtung_tif"]
     reference_tif = Path(args.reference_tif) if args.reference_tif else REFERENCE_TIF

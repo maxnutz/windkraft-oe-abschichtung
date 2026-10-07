@@ -250,6 +250,20 @@ def _check_layers(layer_dir: Path) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente der Finalisierungsstufe.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``config``, ``layer_dir`` (Vorgabe ``contract.DERIVED_LAYERS``),
+        ``output`` (Vorgabe ``contract.PRODUCTS["abschichtung_tif"]``),
+        ``min_fragment_area_ha`` (Vorgabe 10.0) und ``no_overviews``.
+    """
     p = argparse.ArgumentParser(
         description=(
             "Finalisierung W3.1: komponiert das 38-Band-GeoTIFF plus Manifest "
@@ -283,6 +297,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Komponiert das GeoTIFF samt Band-Manifest aus den Checkpoint-Layern.
+
+    Lädt Konfiguration und Raster, prüft mit ``_check_layers()``, dass alle
+    Checkpoints vorliegen, baut die Maske der gültigen Fläche, schreibt das
+    GeoTIFF über ``compose_exclusion_geotiff()`` und direkt danach das Sidecar
+    über ``write_band_manifest()`` aus derselben Bandliste und denselben
+    Datei-Tags. Baut selbst keine Layer.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn Checkpoint-Layer unter dem Layer-Verzeichnis fehlen.
+    """
     args = parse_args(argv)
     layer_dir = Path(args.layer_dir) if args.layer_dir else contract.DERIVED_LAYERS
     output = Path(args.output) if args.output else contract.PRODUCTS["abschichtung_tif"]

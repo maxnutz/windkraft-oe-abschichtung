@@ -89,16 +89,57 @@ def _is_versioned_source(path: Path) -> bool:
 
 
 def _stat(path: Path) -> dict:
+    """Fingerabdruck-Eintrag aus Dateigröße und Änderungszeit.
+
+    Für Rohdaten und Zwischenstände (siehe Moduldocstring).
+
+    Parameters
+    ----------
+    path : Path
+        Datei, deren Metadaten gelesen werden.
+
+    Returns
+    -------
+    dict
+        ``{"kind": "stat", "size": ..., "mtime_ns": ...}``.
+    """
     st = path.stat()
     return {"kind": "stat", "size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
 def _sha256(path: Path) -> dict:
+    """Fingerabdruck-Eintrag aus dem ``sha256`` des Dateiinhalts.
+
+    Für unter Git versionierte Quelldateien (siehe ``_is_versioned_source()``).
+
+    Parameters
+    ----------
+    path : Path
+        Datei, deren Inhalt gehasht wird.
+
+    Returns
+    -------
+    dict
+        ``{"kind": "sha256", "sha256": <hexdigest>}``.
+    """
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return {"kind": "sha256", "sha256": digest}
 
 
 def _fingerprint_entry(path: Path) -> dict:
+    """Wählt je Eingabe die Art des Fingerabdrucks.
+
+    Parameters
+    ----------
+    path : Path
+        Eine Eingabedatei der Stufe.
+
+    Returns
+    -------
+    dict
+        ``_sha256(path)`` für eine versionierte Quelldatei, sonst
+        ``_stat(path)``.
+    """
     if _is_versioned_source(path):
         return _sha256(path)
     return _stat(path)
