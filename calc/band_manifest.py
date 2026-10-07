@@ -368,6 +368,18 @@ BLUR_STRENGTH_DE = {
 
 
 def _cleaned_description(name: str) -> str:
+    """Beschreibung eines ``available_cleaned_min_<n>ha``-Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname; die Mindestfläche wird aus ihm gelesen.
+
+    Returns
+    -------
+    str
+        Deutscher Beschreibungstext mit der Mindestfläche in ha.
+    """
     ha = name[len("available_cleaned_min_"):].removesuffix("ha")
     return (
         f"Das Endergebnis: die nach Abzug aller Ausschlüsse verbleibende Fläche, "
@@ -381,11 +393,36 @@ def _sigma_text(name: str) -> str:
 
 
 def _blur_strength_label(name: str) -> str:
+    """Label eines Unschärfebandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname mit Präfix ``PERCENT_BAND_PREFIX``.
+
+    Returns
+    -------
+    str
+        ``"Unschärfe <stärke>"`` mit der Stärke aus ``BLUR_STRENGTH_DE``.
+    """
     key = name[len(PERCENT_BAND_PREFIX):]
     return f"Unschärfe {BLUR_STRENGTH_DE[key]}"
 
 
 def _blur_description(name: str) -> str:
+    """Beschreibung eines Unschärfebandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname mit Präfix ``PERCENT_BAND_PREFIX``.
+
+    Returns
+    -------
+    str
+        Deutscher Beschreibungstext mit der Standardabweichung aus
+        ``_sigma_text()``.
+    """
     sigma = _sigma_text(name)
     return (
         f"Eignungsflächen, weichgezeichnet mit einer Standardabweichung von "
@@ -616,6 +653,19 @@ BLUR_BLEED_AFFECTED_PREFIXES = (PERCENT_BAND_PREFIX,)
 
 
 def _blur_bleed_affected(name: str) -> bool:
+    """Ob ein Band vom Unschärfe-Caveat betroffen ist.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    bool
+        ``True`` für Bandnamen mit einem Präfix aus
+        ``BLUR_BLEED_AFFECTED_PREFIXES``.
+    """
     return name.startswith(BLUR_BLEED_AFFECTED_PREFIXES)
 
 
@@ -659,6 +709,18 @@ TUNNELFILTER_AFFECTED_EXACT = {
 
 
 def _tunnelfilter_affected(name: str) -> bool:
+    """Ob ein Band vom Tunnelfilter-Caveat betroffen ist.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    bool
+        ``True`` für Bandnamen in ``TUNNELFILTER_AFFECTED_EXACT``.
+    """
     return name in TUNNELFILTER_AFFECTED_EXACT
 
 
@@ -726,6 +788,19 @@ _ROLE_REFERENZ_NAMES = {"official_wind_zoning", "wka_bestand_ausserhalb_zonen"}
 
 
 def band_role(name: str) -> str:
+    """Rolle eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        Eine der Rollen aus ``ROLLEN``; ``ROLE_BEDINGUNG`` für jedes Band, das
+        keiner anderen Rolle zugeordnet ist.
+    """
     if name in _ROLE_AGGREGAT_KATEGORIE_NAMES:
         return ROLE_AGGREGAT_KATEGORIE
     if name in _ROLE_AGGREGAT_GESAMT_NAMES:
@@ -781,10 +856,34 @@ BUFFER_NOTE_DE = {
 
 
 def band_buffer_m(name: str) -> float | None:
+    """Pufferdistanz eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    float or None
+        Eintrag aus ``BUFFER_M``, sonst ``None``.
+    """
     return BUFFER_M.get(name)
 
 
 def band_buffer_note_de(name: str) -> str | None:
+    """Hinweistext zum Puffer eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str or None
+        Eintrag aus ``BUFFER_NOTE_DE``, sonst ``None``.
+    """
     return BUFFER_NOTE_DE.get(name)
 
 
@@ -952,10 +1051,36 @@ BAND_DERIVED_FROM: dict[str, list[str]] = {
 
 
 def band_sources(name: str) -> list[str]:
+    """Quellschlüssel eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    list of str
+        Kopie des Eintrags aus ``BAND_SOURCES``, sonst leer.
+    """
     return list(BAND_SOURCES.get(name, []))
 
 
 def band_derived_from(name: str) -> list[str]:
+    """Bänder, aus denen ein Band abgeleitet ist.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    list of str
+        ``["available_after_all_exclusions_raw"]`` für die bereinigten und die
+        Unschärfebänder, sonst eine Kopie des Eintrags aus
+        ``BAND_DERIVED_FROM`` (leer, wenn keiner existiert).
+    """
     if name.startswith("available_cleaned_min_"):
         return ["available_after_all_exclusions_raw"]
     if name.startswith(PERCENT_BAND_PREFIX):
@@ -1244,6 +1369,24 @@ BAND_STUFE: dict[str, str] = {
 
 
 def band_familie(name: str) -> str:
+    """Familie eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        Eintrag aus ``BAND_FAMILIE``; ``"ergebnis"`` für die bereinigten und die
+        Unschärfebänder.
+
+    Raises
+    ------
+    KeyError
+        Wenn das Band keiner Familie zugeordnet ist.
+    """
     if name in BAND_FAMILIE:
         return BAND_FAMILIE[name]
     if name.startswith("available_cleaned_min_") or name.startswith(PERCENT_BAND_PREFIX):
@@ -1252,6 +1395,24 @@ def band_familie(name: str) -> str:
 
 
 def band_stufe(name: str) -> str:
+    """Stufe eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        Eintrag aus ``BAND_STUFE``; ``"ergebnis"`` für die bereinigten und die
+        Unschärfebänder.
+
+    Raises
+    ------
+    KeyError
+        Wenn das Band keiner Stufe zugeordnet ist.
+    """
     if name in BAND_STUFE:
         return BAND_STUFE[name]
     if name.startswith("available_cleaned_min_") or name.startswith(PERCENT_BAND_PREFIX):
@@ -1326,14 +1487,53 @@ def band_default_visible(name: str, stufe: str) -> bool:
 # --------------------------------------------------------------------------
 
 def band_value_type(name: str) -> str:
+    """Werttyp eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        ``VALUE_TYPE_PERCENT`` für Unschärfebänder, sonst ``VALUE_TYPE_BINARY``.
+    """
     return VALUE_TYPE_PERCENT if name.startswith(PERCENT_BAND_PREFIX) else VALUE_TYPE_BINARY
 
 
 def band_clipped_to_austria(name: str) -> bool:
+    """Ob ein Band auf Österreich zugeschnitten ist.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    bool
+        ``True`` für Namen in ``CLIPPED_EXACT`` oder mit einem Präfix aus
+        ``CLIPPED_PREFIXES``.
+    """
     return name in CLIPPED_EXACT or name.startswith(CLIPPED_PREFIXES)
 
 
 def band_label_de(name: str) -> str:
+    """Label eines Bandes auf Deutsch.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        Eintrag aus ``LABELS_DE``; ``"Eignungsflächen"`` für die bereinigten
+        Bänder; das Label aus ``_blur_strength_label()`` für Unschärfebänder;
+        sonst der Bandname selbst.
+    """
     if name in LABELS_DE:
         return LABELS_DE[name]
     if name.startswith("available_cleaned_min_"):
@@ -1347,6 +1547,22 @@ def band_label_de(name: str) -> str:
 
 
 def band_description_de(name: str, condition_descriptions: dict[str, str]) -> str:
+    """Deutsche Beschreibung eines Bandes.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+    condition_descriptions : dict of str to str
+        Beschreibungen der Bedingungsbänder; haben Vorrang.
+
+    Returns
+    -------
+    str
+        Die erste Fundstelle aus ``condition_descriptions``,
+        ``DESCRIPTIONS_DE``, ``DESCRIPTIONS_DE_TRAILING``, dann die Texte für
+        bereinigte und Unschärfebänder; sonst ein leerer String.
+    """
     if name in condition_descriptions:
         return condition_descriptions[name]
     if name in DESCRIPTIONS_DE:
@@ -1361,6 +1577,27 @@ def band_description_de(name: str, condition_descriptions: dict[str, str]) -> st
 
 
 def band_entry(index: int, name: str, condition_descriptions: dict[str, str]) -> dict:
+    """Manifest-Eintrag eines Bandes.
+
+    Parameters
+    ----------
+    index : int
+        Bandindex im GeoTIFF.
+    name : str
+        Bandname.
+    condition_descriptions : dict of str to str
+        Beschreibungen der Bedingungsbänder, an ``band_description_de()``
+        durchgereicht.
+
+    Returns
+    -------
+    dict
+        ``index``, ``name``, ``label_de``, ``description_de``, ``category``,
+        ``value_type``, ``clipped_to_austria``, ``is_total``, ``color_rgba``,
+        ``default_visible``, ``rolle``, ``puffer_m``, ``puffer_hinweis``,
+        ``quelle``, ``abgeleitet_von``, ``familie``, ``stufe`` und
+        ``dashboard_layer``.
+    """
     category, is_total = categorize_layer(name)
     stufe = band_stufe(name)
     return {
@@ -1390,6 +1627,18 @@ def band_entry(index: int, name: str, condition_descriptions: dict[str, str]) ->
 
 
 def _crs_text(crs) -> str:
+    """Textform eines CRS.
+
+    Parameters
+    ----------
+    crs : object
+        CRS-Objekt oder beliebiger Wert.
+
+    Returns
+    -------
+    str
+        ``crs.to_string()``, falls vorhanden, sonst ``str(crs)``.
+    """
     to_string = getattr(crs, "to_string", None)
     if callable(to_string):
         return to_string()
@@ -1397,6 +1646,19 @@ def _crs_text(crs) -> str:
 
 
 def _pixel_size_m(grid: dict) -> float:
+    """Pixelgröße eines Rasters in Metern.
+
+    Parameters
+    ----------
+    grid : dict
+        Raster mit ``transform`` (Affine oder 6-Tupel).
+
+    Returns
+    -------
+    float
+        Größerer Betrag von ``a`` und ``e`` der Transformation, auf 6
+        Nachkommastellen gerundet.
+    """
     transform = grid["transform"]
     a = getattr(transform, "a", None)
     e = getattr(transform, "e", None)
