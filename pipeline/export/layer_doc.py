@@ -85,10 +85,35 @@ erklärt die FORM.
 
 
 def load_manifest(path: Path) -> dict:
+    """Liest das Band-Manifest.
+
+    Parameters
+    ----------
+    path : Path
+        Pfad zu ``abschichtung.bands.json``.
+
+    Returns
+    -------
+    dict
+        Das geparste JSON.
+    """
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def _fmt_puffer(band: dict) -> str:
+    """Formatiert den Puffer eines Bandes.
+
+    Parameters
+    ----------
+    band : dict
+        Bandeintrag aus dem Manifest.
+
+    Returns
+    -------
+    str
+        ``puffer_m`` in Metern und ``puffer_hinweis``, durch Leerzeichen
+        getrennt; ``"keiner"``, wenn beides fehlt.
+    """
     m = band.get("puffer_m")
     hinweis = band.get("puffer_hinweis")
     if m is None and not hinweis:
@@ -102,6 +127,21 @@ def _fmt_puffer(band: dict) -> str:
 
 
 def _fmt_quellen(band: dict, sources: dict) -> str:
+    """Formatiert die Quellen eines Bandes.
+
+    Parameters
+    ----------
+    band : dict
+        Bandeintrag aus dem Manifest.
+    sources : dict
+        ``sources`` aus dem Manifest.
+
+    Returns
+    -------
+    str
+        Je Quellschlüssel ``<key>: <pfad> (Stand <stand>)``, durch ``; `` getrennt;
+        ``"–"``, wenn das Band keine Quelle nennt.
+    """
     keys = band.get("quelle") or []
     if not keys:
         return "–"
@@ -116,21 +156,77 @@ def _fmt_quellen(band: dict, sources: dict) -> str:
 
 
 def _fmt_abgeleitet(band: dict) -> str:
+    """Formatiert die Bänder, aus denen ein Band abgeleitet ist.
+
+    Parameters
+    ----------
+    band : dict
+        Bandeintrag aus dem Manifest.
+
+    Returns
+    -------
+    str
+        ``abgeleitet_von`` kommagetrennt, sonst ``"–"``.
+    """
     dep = band.get("abgeleitet_von") or []
     return ", ".join(dep) if dep else "–"
 
 
 def _fmt_caveats(band: dict, caveats: list[dict]) -> str:
+    """Listet die Caveats, die ein Band betreffen.
+
+    Parameters
+    ----------
+    band : dict
+        Bandeintrag aus dem Manifest.
+    caveats : list of dict
+        ``caveats`` aus dem Manifest.
+
+    Returns
+    -------
+    str
+        Die ``id`` jedes Caveats, dessen ``affects.bands`` den Index des Bandes
+        enthält, kommagetrennt; sonst ``"keine"``.
+    """
     idx = band.get("index")
     ids = [c.get("id") for c in caveats if idx in (c.get("affects") or {}).get("bands", [])]
     return ", ".join(ids) if ids else "keine"
 
 
 def _ja_nein(value: bool) -> str:
+    """Übersetzt einen Wahrheitswert in ``"ja"`` oder ``"nein"``.
+
+    Parameters
+    ----------
+    value : bool
+        Der Wert.
+
+    Returns
+    -------
+    str
+        ``"ja"`` oder ``"nein"``.
+    """
     return "ja" if value else "nein"
 
 
 def _band_section(band: dict, sources: dict, caveats: list[dict]) -> list[str]:
+    """Baut den Markdown-Abschnitt eines Bandes.
+
+    Parameters
+    ----------
+    band : dict
+        Bandeintrag aus dem Manifest.
+    sources : dict
+        ``sources`` aus dem Manifest.
+    caveats : list of dict
+        ``caveats`` aus dem Manifest.
+
+    Returns
+    -------
+    list of str
+        Überschrift mit dem Bandnamen und eine Feld/Wert-Tabelle; Zeilenumbrüche
+        und ``|`` in den Werten sind maskiert.
+    """
     lines = [f"#### {band['name']}", "", "| Feld | Wert |", "|---|---|"]
     rows = [
         ("Index", str(band.get("index"))),
@@ -155,6 +251,22 @@ def _band_section(band: dict, sources: dict, caveats: list[dict]) -> list[str]:
 
 
 def build_layer_md(manifest: dict) -> str:
+    """Erzeugt den Text von ``LAYER.md`` aus dem Manifest.
+
+    Enthält die Einleitung, das Stufen-Vokabular, die Parameter, die Caveats
+    und je Kategorie (in ``category_order``) die Bänder, gruppiert nach
+    Familie und nach Index sortiert. Kein Bandname steht im Code.
+
+    Parameters
+    ----------
+    manifest : dict
+        Das Band-Manifest.
+
+    Returns
+    -------
+    str
+        Markdown, mit genau einem abschließenden Zeilenumbruch.
+    """
     stufen = manifest.get("stufen", [])
     stufe_order = manifest.get("stufe_order", [b["key"] for b in stufen])
     stufen_by_key = {s["key"]: s for s in stufen}
@@ -224,6 +336,18 @@ def build_layer_md(manifest: dict) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente des ``LAYER.md``-Exports.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``manifest`` und ``out`` (Vorgaben aus ``contract.PRODUCTS``).
+    """
     p = argparse.ArgumentParser(
         description="Erzeugt out/LAYER.md aus out/abschichtung.bands.json - kein Bandname im Code."
     )
@@ -233,6 +357,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Schreibt ``out/LAYER.md`` aus dem Band-Manifest.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    int
+        0 bei Erfolg; 1, wenn das Manifest fehlt.
+    """
     args = parse_args(argv)
     manifest_path = Path(args.manifest) if args.manifest else contract.PRODUCTS["abschichtung_bands_json"]
     out_path = Path(args.out) if args.out else contract.PRODUCTS["layer_md"]

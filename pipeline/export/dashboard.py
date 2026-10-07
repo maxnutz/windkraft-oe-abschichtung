@@ -123,6 +123,18 @@ except ImportError:  # pragma: no cover - rasterio ist eine harte Abhängigkeit
 # ---------------------------------------------------------------------------
 
 def load_manifest(path: Path) -> dict:
+    """Liest das Band-Manifest.
+
+    Parameters
+    ----------
+    path : Path
+        Pfad zu ``abschichtung.bands.json``.
+
+    Returns
+    -------
+    dict
+        Das geparste JSON.
+    """
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
@@ -204,6 +216,21 @@ UNKNOWN_CATEGORY = "(ohne category)"
 
 
 def _band_summary(b: dict) -> dict:
+    """Kurzfassung eines Manifest-Bandeintrags für den Bericht.
+
+    Parameters
+    ----------
+    b : dict
+        Ein Eintrag aus ``manifest["bands"]``.
+
+    Returns
+    -------
+    dict
+        ``index``, ``name``, ``label_de``, ``rolle``, ``category``, ``puffer_m``,
+        ``puffer_hinweis`` sowie die Anzahl der Einträge in ``quelle`` und
+        ``abgeleitet_von``. Fehlende Rolle oder Kategorie wird durch
+        ``UNKNOWN_ROLE`` bzw. ``UNKNOWN_CATEGORY`` ersetzt.
+    """
     return {
         "index": b.get("index"),
         "name": b.get("name"),
@@ -218,6 +245,19 @@ def _band_summary(b: dict) -> dict:
 
 
 def group_by_role(bands: list[dict]) -> dict[str, list[dict]]:
+    """Gruppiert Bänder nach ihrer Rolle.
+
+    Parameters
+    ----------
+    bands : list of dict
+        Bandeinträge aus dem Manifest.
+
+    Returns
+    -------
+    dict of str to list of dict
+        Je Rolle (fehlend: ``UNKNOWN_ROLE``) die Kurzfassungen aus
+        ``_band_summary()``, in Manifest-Reihenfolge.
+    """
     groups: dict[str, list[dict]] = {}
     for b in bands:
         groups.setdefault(b.get("rolle") or UNKNOWN_ROLE, []).append(_band_summary(b))
@@ -225,6 +265,23 @@ def group_by_role(bands: list[dict]) -> dict[str, list[dict]]:
 
 
 def group_by_category(bands: list[dict], category_order: list[str]) -> dict[str, list[dict]]:
+    """Gruppiert Bänder nach ihrer Kategorie.
+
+    Parameters
+    ----------
+    bands : list of dict
+        Bandeinträge aus dem Manifest.
+    category_order : list of str
+        Kategorien, die in dieser Reihenfolge vorab angelegt werden, auch wenn
+        sie leer bleiben.
+
+    Returns
+    -------
+    dict of str to list of dict
+        Je Kategorie (fehlend: ``UNKNOWN_CATEGORY``) die Kurzfassungen aus
+        ``_band_summary()``. Kategorien außerhalb von ``category_order`` werden
+        hinten angehängt.
+    """
     groups: dict[str, list[dict]] = {cat: [] for cat in category_order}
     for b in bands:
         cat = b.get("category") or UNKNOWN_CATEGORY
@@ -237,6 +294,24 @@ def group_by_category(bands: list[dict], category_order: list[str]) -> dict[str,
 # ---------------------------------------------------------------------------
 
 def cross_check_raster(manifest: dict, raster_path: Path) -> dict:
+    """Gleicht Bandzahl und Bandnamen des Rasters gegen das Manifest ab.
+
+    Parameters
+    ----------
+    manifest : dict
+        Das Band-Manifest.
+    raster_path : Path
+        Das zugehörige GeoTIFF.
+
+    Returns
+    -------
+    dict
+        ``{"checked": False, "reason": ...}``, wenn ``rasterio`` fehlt oder das
+        Raster nicht existiert. Sonst ``checked``, ``raster_path``,
+        ``raster_band_count``, ``manifest_band_count``, ``band_count_match``,
+        ``names_match`` und ``mismatches`` (je abweichendem Index ein Eintrag,
+        dazu einer bei ungleicher Länge).
+    """
     if rasterio is None:
         return {"checked": False, "reason": "rasterio nicht installiert"}
     if not raster_path.exists():
@@ -278,6 +353,23 @@ def cross_check_raster(manifest: dict, raster_path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def build_report(manifest: dict, raster_path: Path | None) -> dict:
+    """Baut den Prüfbericht des Dashboards aus dem Manifest.
+
+    Parameters
+    ----------
+    manifest : dict
+        Das Band-Manifest.
+    raster_path : Path or None
+        Raster für ``cross_check_raster()``; ``None`` überspringt den Abgleich.
+
+    Returns
+    -------
+    dict
+        Erzeugungszeit, Kopfdaten des Manifests, Ergebnis der Manifestprüfung
+        (``validation``), Rasterabgleich (``raster_check``), Gruppierungen nach
+        Rolle und Kategorie, ``sources``, ``caveats``, Wirkungspfade und die
+        Kurzfassung jedes Bandes.
+    """
     bands = manifest.get("bands", [])
     problems = _validate_manifest_shape(manifest) + _validate_references(manifest)
     category_order = manifest.get("category_order") or sorted(
@@ -321,6 +413,20 @@ def build_report(manifest: dict, raster_path: Path | None) -> dict:
 # ---------------------------------------------------------------------------
 
 def write_json_report(out_dir: Path, report: dict) -> Path:
+    """Schreibt den Bericht als ``report.json``.
+
+    Parameters
+    ----------
+    out_dir : Path
+        Zielverzeichnis.
+    report : dict
+        Bericht aus ``build_report()``.
+
+    Returns
+    -------
+    Path
+        Pfad der geschriebenen Datei.
+    """
     out_path = out_dir / "report.json"
     out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     return out_path
@@ -333,6 +439,19 @@ def write_json_report(out_dir: Path, report: dict) -> Path:
 # ---------------------------------------------------------------------------
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente des Dashboard-Exports.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``manifest``, ``raster``, ``out`` (Vorgaben aus ``contract.PRODUCTS``)
+        und ``skip_raster``.
+    """
     p = argparse.ArgumentParser(
         description=(
             "W4.1: liest das Band-Manifest (nie eine fest verdrahtete Bandliste) und "
@@ -352,6 +471,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Liest das Manifest, baut den Prüfbericht und schreibt ``report.json``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    int
+        0 bei Erfolg; 1, wenn die Manifestprüfung Probleme findet oder Raster
+        und Manifest im Abgleich nicht übereinstimmen.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn das Manifest fehlt.
+    """
     args = parse_args(argv)
     manifest_path = Path(args.manifest) if args.manifest else contract.PRODUCTS["abschichtung_bands_json"]
     raster_path = Path(args.raster) if args.raster else contract.PRODUCTS["abschichtung_tif"]

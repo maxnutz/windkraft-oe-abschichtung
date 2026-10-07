@@ -115,6 +115,19 @@ _POWER_RE = re.compile(r"^\s*([0-9]+(?:[.,][0-9]+)?)\s*([a-zA-Z]*)\s*$")
 
 
 def _none_if_nan(value):
+    """Normalisiert leere Attributwerte auf ``None``.
+
+    Parameters
+    ----------
+    value : object
+        Ein Zellwert aus dem Parquet.
+
+    Returns
+    -------
+    object or None
+        ``None`` für ``None``, ``NaN`` und leere bzw. nur aus Leerzeichen
+        bestehende Strings, sonst ``value`` unverändert.
+    """
     if value is None:
         return None
     if isinstance(value, float) and np.isnan(value):
@@ -154,6 +167,19 @@ def _parse_power_kw(raw) -> float | None:
 
 
 def load_turbines() -> gpd.GeoDataFrame:
+    """Liest die OSM-Windkraftanlagen aus der Prep-Stufe.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Inhalt von ``derived/prep/osm/b_layers/`` + ``WINDPOWER_PARQUET_NAME``,
+        nach ``TARGET_CRS`` überführt, falls das CRS fehlt oder abweicht.
+
+    Raises
+    ------
+    SystemExit
+        Wenn die Parquet-Datei fehlt (``make prep-osm`` noch nicht gelaufen).
+    """
     path = contract.PREP["osm"]["b_layers"] / WINDPOWER_PARQUET_NAME
     if not path.exists():
         raise SystemExit(
@@ -221,6 +247,30 @@ def _cluster_hull_ids(points: np.ndarray, outside_mask: np.ndarray) -> np.ndarra
 
 
 def build_export(turbines: gpd.GeoDataFrame, grid: dict) -> tuple[gpd.GeoDataFrame, dict]:
+    """Baut die Punkt-Features des WKA-Bestands samt Kennzahlen.
+
+    Tastet jede Anlage gegen den Layer ``official_wind_zoning`` (``in_zone``)
+    und gegen die gültige Fläche ab. Anlagen innerhalb Österreichs und
+    außerhalb einer Zone bekommen die Nummer ihrer Park-Hülle (``hull_id``),
+    alle anderen ``null``. Fehlen die Spalten für Betreiber, Inbetriebnahme
+    oder Leistung im Parquet, sind die zugehörigen Properties für jedes
+    Feature ``null``.
+
+    Parameters
+    ----------
+    turbines : geopandas.GeoDataFrame
+        Anlagen aus ``load_turbines()``.
+    grid : dict
+        Raster, gegen das getastet wird.
+
+    Returns
+    -------
+    gdf : geopandas.GeoDataFrame
+        Punkte in EPSG:31287 mit ``osm_id``, ``in_zone``, ``hull_id``, ``name``,
+        ``operator``, ``power_kw`` und ``start_date``.
+    counts : dict
+        ``gesamt``, ``in_zone_true``, ``in_zone_false`` und ``huellen``.
+    """
     points = building_points(turbines)
 
     zone_mask = read_layer_mask(contract.LAYERS["official_wind_zoning"])
@@ -297,6 +347,20 @@ def build_export(turbines: gpd.GeoDataFrame, grid: dict) -> tuple[gpd.GeoDataFra
 
 
 def export_geojson(gdf: gpd.GeoDataFrame) -> Path:
+    """Schreibt ``out/wka_bestand_punkte.geojson``.
+
+    Eine vorhandene Datei wird vorher gelöscht.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Punkte aus ``build_export()``.
+
+    Returns
+    -------
+    Path
+        Pfad der geschriebenen Datei.
+    """
     out_path = runtime.ensure_parent(contract.PRODUCTS["wka_bestand_punkte_geojson"])
     if out_path.exists():
         out_path.unlink()
@@ -305,6 +369,22 @@ def export_geojson(gdf: gpd.GeoDataFrame) -> Path:
 
 
 def _verify_written_geojson(path: Path, expected_count: int) -> None:
+    """Liest die geschriebene Datei zurück und prüft sie.
+
+    Parameters
+    ----------
+    path : Path
+        Die geschriebene GeoJSON-Datei.
+    expected_count : int
+        Erwartete Zahl der Features.
+
+    Raises
+    ------
+    SystemExit
+        Wenn die Datei keine FeatureCollection ist, die Feature-Zahl abweicht,
+        das CRS-Member kein EPSG:31287 nennt oder geopandas ein anderes CRS
+        liest.
+    """
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
     if data.get("type") != "FeatureCollection":
@@ -325,6 +405,18 @@ def _verify_written_geojson(path: Path, expected_count: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Exportiert den WKA-Bestand als Punkt-GeoJSON.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Wird nicht ausgewertet.
+
+    Returns
+    -------
+    int
+        0.
+    """
     turbines = load_turbines()
     grid = grid_from_official_wind_zoning()
 

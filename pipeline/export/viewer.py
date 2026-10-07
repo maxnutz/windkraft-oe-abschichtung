@@ -110,6 +110,20 @@ ROLE_GROUP_ORDER = ["Bedingungen", "Kategorien", "Gesamt", "Verfügbarkeit", "Un
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Liest die Kommandozeilenargumente des Viewer-Exports.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``manifest``, ``raster``, ``out`` (Vorgaben aus ``contract.PRODUCTS``) und
+        ``max_size`` (maximale Kantenlänge je PNG-Overlay, Vorgabe
+        ``DEFAULT_MAX_SIZE``).
+    """
     p = argparse.ArgumentParser(
         description=(
             "W6.7: Leaflet/OSM-Kartenviewer aus dem Bandmanifest bauen - liest "
@@ -130,6 +144,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def safe_filename(name: str) -> str:
+    """Macht einen Bandnamen dateinamentauglich.
+
+    Parameters
+    ----------
+    name : str
+        Bandname.
+
+    Returns
+    -------
+    str
+        ``name``, in dem jedes Zeichen außer alphanumerischen, ``_`` und ``-``
+        durch ``_`` ersetzt ist.
+    """
     return "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
 
 
@@ -142,6 +169,20 @@ def overlay_size(width: float, height: float, max_size: int) -> tuple[int, int]:
 
 
 def resampling_for(value_type: str) -> Resampling:
+    """Wählt das Resampling für die Umprojektion eines Bandes.
+
+    Parameters
+    ----------
+    value_type : str
+        ``value_type`` des Bandes aus dem Manifest.
+
+    Returns
+    -------
+    rasterio.enums.Resampling
+        ``Resampling.average`` für Prozentbänder (``VALUE_TYPE_PERCENT``), sonst
+        ``Resampling.max``, damit Ausschlussflächen beim Verkleinern nicht
+        verschwinden.
+    """
     return Resampling.average if value_type == VALUE_TYPE_PERCENT else Resampling.max
 
 
@@ -336,10 +377,46 @@ document.getElementById('all').onclick = () => document.querySelectorAll('#layer
 
 
 def build_html(viewer_manifest: dict) -> str:
+    """Setzt das Viewer-Manifest in die HTML-Vorlage ein.
+
+    Parameters
+    ----------
+    viewer_manifest : dict
+        Viewer-Manifest, wie es ``main()`` baut.
+
+    Returns
+    -------
+    str
+        ``HTML_TEMPLATE`` mit dem JSON an Stelle von ``__MANIFEST__``.
+    """
     return HTML_TEMPLATE.replace("__MANIFEST__", json.dumps(viewer_manifest))
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Baut den Leaflet/OSM-Kartenviewer aus Manifest und Raster.
+
+    Rendert je Band ein nach EPSG:3857 umprojiziertes PNG-Overlay nach
+    ``<out>/layers/`` (vorhandene PNGs dort werden vorher gelöscht), gruppiert
+    die Bänder nach Rolle und schreibt ``manifest.json`` und ``index.html``
+    nach ``<out>``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argumentliste für ``parse_args()``; ``None`` liest ``sys.argv``.
+
+    Returns
+    -------
+    int
+        0.
+
+    Raises
+    ------
+    FileNotFoundError
+        Wenn Manifest oder Raster fehlt.
+    RuntimeError
+        Wenn die Bandzahl des Rasters nicht zur Zahl der Manifest-Bänder passt.
+    """
     args = parse_args(argv)
     manifest_path = Path(args.manifest) if args.manifest else contract.PRODUCTS["abschichtung_bands_json"]
     raster_path = Path(args.raster) if args.raster else contract.PRODUCTS["abschichtung_tif"]

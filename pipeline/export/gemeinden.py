@@ -246,22 +246,72 @@ class CoverageResult:
 
     @property
     def abs_diff_km2(self) -> float:
+        """Deckungsabweichung Raster minus Vektor in km².
+
+        Returns
+        -------
+        float
+            ``(raster_area_m2 - vector_area_m2) / 1e6``.
+        """
         return (self.raster_area_m2 - self.vector_area_m2) / 1e6
 
     @property
     def rel_diff_pct(self) -> float:
+        """Deckungsabweichung relativ zur Vektorfläche in Prozent.
+
+        Returns
+        -------
+        float
+            ``(raster_area_m2 - vector_area_m2) / vector_area_m2 * 100``.
+        """
         return (self.raster_area_m2 - self.vector_area_m2) / self.vector_area_m2 * 100.0
 
     @property
     def within_threshold(self) -> bool:
+        """Ob die Deckungsabweichung den Schwellwert einhält.
+
+        Returns
+        -------
+        bool
+            ``True``, wenn ``abs(abs_diff_km2) <= threshold_km2``.
+        """
         return abs(self.abs_diff_km2) <= self.threshold_km2
 
     @property
     def overlap_gap_m2(self) -> float:
+        """Überlapp bzw. Lücke der Gemeindepolygone in m².
+
+        Returns
+        -------
+        float
+            Summe der Einzelflächen minus Fläche ihrer Vereinigung; 0 heißt
+            überlappungs- und lückenfrei.
+        """
         return self.vector_area_m2 - self.union_area_m2
 
 
 def measure_coverage(gdf: gpd.GeoDataFrame, grid: dict) -> CoverageResult:
+    """Misst die Deckung der Gemeindegrenzen gegen die gültige Rasterfläche.
+
+    Die Rasterfläche kommt aus ``_build_valid_area_mask()``, derselben Funktion,
+    die ``pipeline/finalize.py`` für die gültige Fläche des TIF benutzt. Der
+    Rasterisierungssaum ist ``all_touched=True`` minus ``all_touched=False``
+    derselben Polygone. Der Schwellwert ist ein Ein-Zellen-Ring um den Umfang
+    der Vereinigung. Zusätzlich wird der Anteil der gültigen Rasterfläche
+    außerhalb aller 9 Bundesländer gemessen (Bodensee-Gegenprobe).
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Die Gemeindepolygone.
+    grid : dict
+        Raster des TIF, mit ``shape`` und ``transform``.
+
+    Returns
+    -------
+    CoverageResult
+        Alle Messwerte der Deckungsprüfung.
+    """
     shape = grid["shape"]
     transform = grid["transform"]
     cell_m = abs(float(transform.a))
@@ -335,6 +385,18 @@ def measure_coverage(gdf: gpd.GeoDataFrame, grid: dict) -> CoverageResult:
 
 
 def format_report(result: CoverageResult) -> str:
+    """Formatiert das Ergebnis der Deckungsprüfung als Textbericht.
+
+    Parameters
+    ----------
+    result : CoverageResult
+        Ergebnis aus ``measure_coverage()``.
+
+    Returns
+    -------
+    str
+        Mehrzeiliger Bericht.
+    """
     lines = [
         "=== Deckungsprüfung Gemeinden vs. TIF (PLAN.md §7) ===",
         f"Gemeinden: {result.n_gemeinden} (erwartet {EXPECTED_GEMEINDEN}), "
@@ -373,6 +435,30 @@ def format_report(result: CoverageResult) -> str:
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
+    """Exportiert ``out/gemeinden.geojson`` und prüft die Deckung gegen das TIF.
+
+    Prüft vor dem Schreiben Gemeindezahl, Bundesländerzahl und Gültigkeit der
+    Geometrien, liest die geschriebene Datei zur Kontrolle zurück und misst,
+    falls ``out/abschichtung.tif`` existiert, die Deckung. Fehlt das TIF, wird
+    die Deckungsprüfung übersprungen.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Wird nicht ausgewertet.
+
+    Returns
+    -------
+    int
+        0 bei Erfolg oder fehlendem TIF; 1, wenn eine der Vorprüfungen
+        scheitert oder die Deckungsabweichung über dem Schwellwert liegt.
+
+    Raises
+    ------
+    SystemExit
+        Wenn die zurückgelesene GeoJSON-Datei oder das CRS des TIF nicht den
+        Erwartungen entspricht.
+    """
     gdf = load_gemeinden()
 
     if len(gdf) != EXPECTED_GEMEINDEN:
