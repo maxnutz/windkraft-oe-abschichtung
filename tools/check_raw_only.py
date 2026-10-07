@@ -170,6 +170,19 @@ def _runtime_bindings(tree: ast.Module) -> set[str]:
 
 
 def _is_data_literal_str(value: str) -> bool:
+    """Ob ein String-Literal einen Pfad unter ``data/`` bezeichnet.
+
+    Parameters
+    ----------
+    value : str
+        Das Literal.
+
+    Returns
+    -------
+    bool
+        ``True`` für ``"data"``, für Literale, die mit ``data/`` beginnen, und für
+        Literale, die ``/data/`` enthalten.
+    """
     return value == "data" or value.startswith("data/") or "/data/" in value
 
 
@@ -179,10 +192,39 @@ class _TaintChecker:
     über einen zusammengesetzten Pfad mit dem Segment ``"data"``."""
 
     def __init__(self, contract_modules: set[str], contract_names: set[str]):
+        """Legt die Namen fest, die als Herkunft aus ``data/`` gelten.
+
+        Parameters
+        ----------
+        contract_modules : set of str
+            Lokale Namen des Vertragsmoduls (aus ``_contract_bindings()``).
+        contract_names : set of str
+            Direkt importierte Rohpfad-Symbole (aus ``_contract_bindings()``).
+        """
         self.contract_modules = contract_modules
         self.contract_names = contract_names
 
     def is_tainted(self, node: ast.AST, local_tainted: set[str]) -> bool:
+        """Ob ein Ausdruck einen Pfad aus ``data/`` ergibt.
+
+        Als belastet gelten Vertragssymbole (``RAW``, ``DATA``, ``LEGACY_TOT``,
+        ``LEGACY_ENTFAELLT``), lokal belastete Namen und ``data/``-Literale. Taint
+        wird durch Attribute, Subskripte, ``/``, ``or``/``and``, bedingte Ausdrücke
+        sowie ``joinpath``, ``resolve``, ``absolute``, ``with_suffix``,
+        ``with_name``, ``os.path.join`` und ``Path(...)`` weitergereicht.
+
+        Parameters
+        ----------
+        node : ast.AST
+            Der zu prüfende Ausdruck.
+        local_tainted : set of str
+            In der aktuellen Funktion bereits als belastet erkannte Namen.
+
+        Returns
+        -------
+        bool
+            ``True``, wenn der Ausdruck als aus ``data/`` stammend erkannt wird.
+        """
         if isinstance(node, ast.Name):
             return node.id in self.contract_names or node.id in local_tainted
         if isinstance(node, ast.Attribute):
@@ -228,6 +270,23 @@ class _TaintChecker:
 
 
 def _first_matching_arg(call: ast.Call, keywords: tuple[str, ...], index: int = 0):
+    """Liefert ein Aufrufargument nach Position oder Schlüsselwort.
+
+    Parameters
+    ----------
+    call : ast.Call
+        Der Aufruf.
+    keywords : tuple of str
+        Schlüsselwortnamen, unter denen das Argument stehen kann.
+    index : int, optional
+        Position des Arguments, Vorgabe 0.
+
+    Returns
+    -------
+    ast.expr or None
+        Das Positionsargument an ``index``, falls vorhanden, sonst den Wert des
+        ersten passenden Schlüsselworts, sonst ``None``.
+    """
     if len(call.args) > index:
         return call.args[index]
     for kw in call.keywords:
@@ -237,6 +296,22 @@ def _first_matching_arg(call: ast.Call, keywords: tuple[str, ...], index: int = 
 
 
 def _mode_is_write(call: ast.Call, mode_index: int = 1) -> bool:
+    """Ob das Modus-Argument eines Aufrufs schreibend ist.
+
+    Parameters
+    ----------
+    call : ast.Call
+        Der Aufruf.
+    mode_index : int, optional
+        Position des Modus-Arguments, Vorgabe 1.
+
+    Returns
+    -------
+    bool
+        ``True``, wenn der Modus ein String-Literal mit einem Zeichen aus
+        ``WRITE_MODE_CHARS`` ist. ``False`` ohne Modus oder bei dynamischem
+        Modus.
+    """
     mode_node = _first_matching_arg(call, ("mode",), mode_index)
     if mode_node is None:
         return False  # kein Modus angegeben -> Default ist meist Lesen ("r")
@@ -258,6 +333,19 @@ class _FunctionScanner(ast.NodeVisitor):
         findings: list[Finding],
         file_path: Path,
     ):
+        """Bereitet den Scan einer Funktion vor.
+
+        Parameters
+        ----------
+        checker : _TaintChecker
+            Prüft Ausdrücke auf Herkunft aus ``data/``.
+        runtime_names : set of str
+            Lokale Namen für ``pipeline.runtime.ensure_dir``/``ensure_parent``.
+        findings : list of Finding
+            Liste, an die Funde angehängt werden.
+        file_path : Path
+            Die gescannte Datei, für die Funde.
+        """
         self.checker = checker
         self.runtime_names = runtime_names
         self.findings = findings
@@ -265,6 +353,14 @@ class _FunctionScanner(ast.NodeVisitor):
         self.tainted: set[str] = set()
 
     def _init_params(self, fn: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Markiert Parameter mit belastetem Vorgabewert als belastet.
+
+        Parameters
+        ----------
+        fn : ast.FunctionDef or ast.AsyncFunctionDef
+            Die gescannte Funktion; berücksichtigt positionelle und
+            Keyword-only-Parameter.
+        """
         args = fn.args
         positional = args.posonlyargs + args.args
         defaults = args.defaults
@@ -278,14 +374,40 @@ class _FunctionScanner(ast.NodeVisitor):
                 self.tainted.add(arg.arg)
 
     def run(self, fn: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """Scannt eine Funktion: Parameter, dann Körper.
+
+        Parameters
+        ----------
+        fn : ast.FunctionDef or ast.AsyncFunctionDef
+            Die zu scannende Funktion.
+        """
         self._init_params(fn)
         self._walk_body(fn.body)
 
     def _walk_body(self, body: list[ast.stmt]) -> None:
+        """Besucht eine Anweisungsliste der Reihe nach.
+
+        Parameters
+        ----------
+        body : list of ast.stmt
+            Die Anweisungen.
+        """
         for stmt in body:
             self._visit_stmt(stmt)
 
     def _visit_stmt(self, stmt: ast.stmt) -> None:
+        """Verarbeitet eine Anweisung.
+
+        Zuweisungen an einen einfachen Namen setzen oder entfernen dessen Taint
+        je nach Wert. In allen Ausdrücken werden Aufrufe geprüft; Blöcke von
+        ``if``, ``for``, ``while``, ``with`` und ``try`` werden rekursiv besucht.
+        Verschachtelte Funktionen werden übersprungen.
+
+        Parameters
+        ----------
+        stmt : ast.stmt
+            Die Anweisung.
+        """
         # Zuweisungen: Taint des Ziels aus dem Wert ableiten.
         if isinstance(stmt, ast.Assign):
             self._check_expr_for_calls(stmt.value)
@@ -335,6 +457,13 @@ class _FunctionScanner(ast.NodeVisitor):
                     self._check_expr_for_calls(child)
 
     def _check_expr_for_calls(self, expr: ast.expr | None) -> None:
+        """Prüft jeden Aufruf innerhalb eines Ausdrucks.
+
+        Parameters
+        ----------
+        expr : ast.expr or None
+            Der Ausdruck; ``None`` wird ignoriert.
+        """
         if expr is None:
             return
         for node in ast.walk(expr):
@@ -342,6 +471,18 @@ class _FunctionScanner(ast.NodeVisitor):
                 self._check_call(node)
 
     def _check_call(self, call: ast.Call) -> None:
+        """Prüft einen Aufruf auf einen Schreibzugriff nach ``data/``.
+
+        Erkennt die Schreib-APIs aus ``WRITE_APIS_ARG0``, ``WRITE_APIS_SELF``,
+        ``FREE_FUNCS_ARG0`` und ``FREE_FUNCS_DST``, ``open()`` mit schreibendem
+        Modus (als freie Funktion, als ``Path.open`` und als ``modul.open``) sowie
+        Aufrufe von ``ensure_dir``/``ensure_parent`` über lokale Aliase.
+
+        Parameters
+        ----------
+        call : ast.Call
+            Der Aufruf.
+        """
         func = call.func
         if isinstance(func, ast.Attribute):
             method = func.attr
@@ -382,6 +523,17 @@ class _FunctionScanner(ast.NodeVisitor):
                 self._report_if_tainted(call, path_node, f"{func.id}(...)")
 
     def _report_if_tainted(self, call: ast.Call, path_node, desc: str) -> None:
+        """Hängt einen Fund an, wenn das Pfad-Argument belastet ist.
+
+        Parameters
+        ----------
+        call : ast.Call
+            Der Aufruf, dessen Zeilennummer gemeldet wird.
+        path_node : ast.expr or None
+            Das Pfad-Argument; ``None`` wird ignoriert.
+        desc : str
+            Beschreibung des Aufrufs für den Fund.
+        """
         if path_node is None:
             return
         if self.checker.is_tainted(path_node, self.tainted):
@@ -400,6 +552,18 @@ class _FunctionScanner(ast.NodeVisitor):
 
 
 def _scan_file(file_path: Path, findings: list[Finding]) -> None:
+    """Scannt eine Python-Datei und hängt Funde an.
+
+    Jede Funktion bekommt einen eigenen Taint-Scope, die Modulebene einen
+    weiteren. Nicht lesbare oder nicht parsebare Dateien werden übersprungen.
+
+    Parameters
+    ----------
+    file_path : Path
+        Die Datei.
+    findings : list of Finding
+        Liste, an die Funde angehängt werden.
+    """
     try:
         src = file_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -439,10 +603,32 @@ class CheckResult:
 
     @property
     def ok(self) -> bool:
+        """Ob kein Fund vorliegt.
+
+        Returns
+        -------
+        bool
+            ``True``, wenn ``findings`` leer ist.
+        """
         return not self.findings
 
 
 def run_check(repo_root: Path) -> CheckResult:
+    """Scannt alle Python-Dateien unter ``SCAN_DIRS``.
+
+    Übersprungen werden ``__pycache__`` und die beiden Wächter selbst unter
+    ``tools/`` (``SELF_EXCLUDE``).
+
+    Parameters
+    ----------
+    repo_root : Path
+        Wurzel des Repos.
+
+    Returns
+    -------
+    CheckResult
+        Funde und Zahl der gescannten Dateien.
+    """
     findings: list[Finding] = []
     files_scanned = 0
     for dirname in SCAN_DIRS:
@@ -460,6 +646,21 @@ def run_check(repo_root: Path) -> CheckResult:
 
 
 def format_report(result: CheckResult, repo_root: Path) -> str:
+    """Formatiert das Prüfergebnis als Textbericht.
+
+    Parameters
+    ----------
+    result : CheckResult
+        Ergebnis aus ``run_check()``.
+    repo_root : Path
+        Wurzel, relativ zu der die Fundpfade ausgegeben werden.
+
+    Returns
+    -------
+    str
+        Eine ``VERSTOSS``-Zeile je Fund, nach Pfad und Zeile sortiert, dazu
+        eine abschließende ``OK``- oder ``FEHLGESCHLAGEN``-Zeile.
+    """
     lines: list[str] = []
     for f in sorted(result.findings, key=lambda x: (str(x.path), x.lineno)):
         try:
@@ -481,6 +682,18 @@ def format_report(result: CheckResult, repo_root: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Führt den statischen Wächter aus und gibt den Bericht aus.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Wird nicht ausgewertet.
+
+    Returns
+    -------
+    int
+        0 ohne Fund, sonst 1.
+    """
     result = run_check(REPO_ROOT)
     print(format_report(result, REPO_ROOT))
     return 0 if result.ok else 1

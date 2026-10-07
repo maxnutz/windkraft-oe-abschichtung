@@ -123,20 +123,59 @@ class CheckResult:
 
     @property
     def checked_total(self) -> int:
+        """Zahl aller geprüften Dateien.
+
+        Returns
+        -------
+        int
+            ``checked_a + checked_b``.
+        """
         return self.checked_a + self.checked_b
 
     @property
     def ok(self) -> bool:
+        """Ob keine Verstöße gefunden wurden.
+
+        Returns
+        -------
+        bool
+            ``True``, wenn ``violations`` leer ist.
+        """
         return not self.violations
 
 
 def run_check(repo_root: Path) -> CheckResult:
+    """Prüft Regel A unter ``output/`` und Regel B unter ``data/``.
+
+    Parameters
+    ----------
+    repo_root : Path
+        Wurzel des Repos.
+
+    Returns
+    -------
+    CheckResult
+        Verstöße beider Regeln und die Zahl der je Regel geprüften Dateien.
+    """
     violations_a, checked_a = check_rule_a(repo_root / "output")
     violations_b, checked_b = check_rule_b(repo_root / "data")
     return CheckResult(violations_a + violations_b, checked_a, checked_b)
 
 
 def format_report(result: CheckResult) -> str:
+    """Formatiert das Prüfergebnis als Textbericht.
+
+    Parameters
+    ----------
+    result : CheckResult
+        Ergebnis aus ``run_check()``.
+
+    Returns
+    -------
+    str
+        Eine ``VERSTOSS``-Zeile je Verstoß mit Pfad, Inode und Link-Count, dazu
+        eine abschließende ``OK``- oder ``FEHLGESCHLAGEN``-Zeile.
+    """
     lines: list[str] = []
     for v in result.violations:
         regel = "Regel A (output/)" if v.rule == "A" else "Regel B (data/)"
@@ -159,6 +198,18 @@ def format_report(result: CheckResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Führt die Hardlink-Prüfung aus und gibt den Bericht aus.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Wird nicht ausgewertet.
+
+    Returns
+    -------
+    int
+        0 ohne Verstoß, sonst 1.
+    """
     result = run_check(REPO_ROOT)
     print(format_report(result))
     return 0 if result.ok else 1
